@@ -215,9 +215,10 @@ const QUESTIONS = [
   // ───────────────────────── 思考模式（extended thinking） ─────────────────────────
   // 题目里只声明 thinking.effort（'low'|'medium'|'high'|'xhigh'|'max'），app.js 会按当前模型 ID
   // 自动转写成对应的请求结构：
-  //   - claude-opus-4-7              → thinking:{type:"adaptive", display:"summarized"} + output_config.effort
+  //   - claude-fable-5 / opus-4-8 / 4-7 → thinking:{type:"adaptive", display:"summarized"} + output_config.effort
   //   - claude-opus-4-6 / sonnet-4-6 → thinking:{type:"enabled", budget_tokens:N}（effort→budget 映射）
   //   - 其它早期 4.x                  → 同 4-6 形态 + 自动加 beta 头 interleaved-thinking-2025-05-14
+  // effort 越高思考越长；若题目给的 max_tokens 不够，app.js 会按 effort 自动抬到下限，避免思考没写完就被截断。
   // 这样切模型时这两道题不用改。
   {
     id: 'thinking-candy',
@@ -230,7 +231,7 @@ const QUESTIONS = [
       '才能保证至少有 4 颗糖同时满足"口味相同且形状相同"？' +
       '请先认真思考，再给出结论和简洁解释。',
     thinking: { effort: 'max' },
-    max_tokens: 6000,
+    max_tokens: 32000,
     observe:
       '预期：响应里有 thinking 块 + 几百字符的 base64 signature。\n' +
       '4.7：默认 display=omitted（signature 非空、正文空）；本工具会主动加 display:summarized 拿正文。\n' +
@@ -247,7 +248,7 @@ const QUESTIONS = [
       '要求总耗时不超过 6 小时，且必须经过至少一座中转城市。' +
       '请给出所有满足条件的路线，并说明哪条最优。请先认真思考，再给出最终答案。',
     thinking: { effort: 'max' },
-    max_tokens: 8000,
+    max_tokens: 32000,
     observe:
       '同抽屉题的判定原则。这道题约束多、思考链长，对"上游截断思考"的检测更敏感。\n' +
       '观察 thinking 正文 / signature 的字符长度，越长说明上游透传越完整。'
@@ -268,7 +269,7 @@ const QUESTIONS = [
       '（即手中同时存在 "圆形苹果味 + 五角星桃子味"，或 "圆形桃子味 + 五角星苹果味"，任一组合即可）' +
       '请先认真思考，再给出结论和简洁解释。',
     thinking: { effort: 'max' },
-    max_tokens: 8000,
+    max_tokens: 32000,
     observe: '正确答案：21 颗。观察思考链 + signature 是否完整透传。'
   },
   {
@@ -283,7 +284,7 @@ const QUESTIONS = [
       '请问：这位父亲为什么过一会儿崩溃了？他意识到了什么？\n' +
       '提示：这是逻辑推理题，而非情感题目。请先认真思考，再给出最终答案。',
     thinking: { effort: 'max' },
-    max_tokens: 8000,
+    max_tokens: 32000,
     observe: '正确答案：女儿不是亲生的（红绿色觉相关的遗传推理）。'
   },
 

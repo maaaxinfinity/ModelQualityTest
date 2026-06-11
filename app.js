@@ -286,10 +286,14 @@
         // 题目自己已给完整结构，原样透传
         body.thinking = question.thinking;
       } else if (family === 'opus-4-7') {
-        // 4.7：adaptive；不再支持 budget_tokens / temperature / top_p / top_k
+        // 4.7 / 4.8：adaptive；不再支持 budget_tokens / temperature / top_p / top_k
         body.thinking = { type: 'adaptive', display: 'summarized' };
         body.output_config = { effort: effortFor47(effort) };
         delete body.temperature;
+        // adaptive 没有 budget_tokens：effort 越高思考越长，max_tokens 太小会在思考阶段就被截断，
+        // 连最终答案都拿不到。按 effort 给一个下限（题目给得更大就用题目的）。
+        const tokenFloor = minMaxTokensFor47(effort);
+        if (!body.max_tokens || body.max_tokens < tokenFloor) body.max_tokens = tokenFloor;
       } else if (family === 'opus-4-6' || family === 'sonnet-4-6') {
         // 4.6 系：manual extended thinking
         const budget = budgetFor46(effort);
@@ -318,7 +322,8 @@
   // 模型家族识别（用于选 thinking 请求形态）
   function detectThinkingFamily(model) {
     const m = String(model || '').toLowerCase();
-    if (m.includes('opus-4-7')) return 'opus-4-7';
+    // 4.8 / fable-5 与 4.7 请求形态相同：adaptive + output_config.effort（不再用 budget_tokens）
+    if (m.includes('opus-4-8') || m.includes('opus-4-7') || m.includes('fable-5') || m.includes('jupiter-v1-p')) return 'opus-4-7';
     if (m.includes('opus-4-6')) return 'opus-4-6';
     if (m.includes('sonnet-4-6')) return 'sonnet-4-6';
     if (m.includes('opus-4-5') || m.includes('opus-4-1') || m.match(/opus-4(?!-\d)/) ||
@@ -326,9 +331,15 @@
     return 'unknown';
   }
   function effortFor47(e) {
-    // 4.7 合法集合：low / medium / high / xhigh / max
+    // 4.7 / 4.8 合法集合：low / medium / high / xhigh / max
     const ok = ['low', 'medium', 'high', 'xhigh', 'max'];
     return ok.includes(e) ? e : 'medium';
+  }
+  function minMaxTokensFor47(effort) {
+    // adaptive 思考没有 budget_tokens，靠 max_tokens 给"思考链 + 正文"留空间。
+    // effort 越高思考越长；下限太低会在思考阶段就 stop_reason=max_tokens，拿不到最终答案。
+    const table = { low: 6000, medium: 10000, high: 16000, xhigh: 24000, max: 32000 };
+    return table[effort] || 10000;
   }
   function budgetFor46(effort) {
     // 把 effort 翻译成 budget_tokens；上层会同步抬 max_tokens 以满足 budget < max_tokens
@@ -637,7 +648,6 @@
       const hasSig = thinkBlocks.some(t => t.signature);
       const hasText = thinkBlocks.some(t => t.type === 'thinking' && t.textLen > 0);
       const hasRedacted = thinkBlocks.some(t => t.type === 'redacted_thinking');
-      const reqDisplay = reqThinking.display || (reqThinking.type === 'adaptive' ? 'omitted-by-default-on-4-7' : 'summarized-by-default');
 
       if (!thinkBlocks.length) {
         hints.push({
@@ -668,22 +678,17 @@
                   ') + 正文 ' + m(totalText + ' chars') + '：' + st('原生 Claude 思考链路')
           });
         } else {
-          // thinking 块存在、有真实签名，但 text 为空
-          const isOpus47 = String(reqBody.model || '').includes('opus-4-7');
-          const askedSummarized = reqThinking && reqThinking.display === 'summarized';
-          if (isOpus47 && !askedSummarized) {
-            hints.push({
-              level: 'signal',
-              html: 'thinking 块只回签名（' + k(longestSig + ' chars') + '），正文为空：' +
-                    m('Opus 4.7 默认 display="omitted"') + '——本工具会自动加 display:"summarized"，若仍为空请重试。'
-            });
-          } else if (isOpus47 && askedSummarized) {
+          // thinking 块存在、有真实签名，但 text 为空 —— 一律视为异常。
+          // 本工具发 4.7/4.8/fable-5 请求时总会带 display:"summarized"，正文为空不能用"模型默认 omitted"开脱。
+          const mdl47 = String(reqBody.model || '').toLowerCase();
+          const isOpus47 = mdl47.includes('opus-4-8') || mdl47.includes('opus-4-7') || mdl47.includes('fable-5') || mdl47.includes('jupiter-v1-p');
+          if (isOpus47) {
             hints.push({
               level: 'warn',
-              html: '⚠️ 已请求 ' + k('display="summarized"') + '，但 Opus 4.7 仍只返回签名（' + k(longestSig + ' chars') + '）正文为空：' +
-                    st('该渠道在 4.7 上未透出 summarized 正文') +
-                    '（4Router 等反代在 4.7 路径上的常见行为；同一渠道的 ' + m('Sonnet/Opus 4.6') + ' 通常能拿到正文，建议跑"对照题"对比验证）。' +
-                    '说明：' + m('上游 Bedrock 通道或反代实现') + ' 在 4.7 + summarized 组合上有差异，签名签验证仍有效。'
+              html: '⚠️ 已请求 ' + k('display="summarized"') + '，但仍只返回签名（' + k(longestSig + ' chars') + '）正文为空：' +
+                    st('该渠道未透出 summarized 正文') +
+                    '（4Router 等反代在 4.7/4.8 路径上的常见行为；同一渠道的 ' + m('Sonnet/Opus 4.6') + ' 通常能拿到正文，建议跑"对照题"对比验证）。' +
+                    '说明：' + m('上游 Bedrock 通道或反代实现') + ' 在 adaptive + summarized 组合上有差异，签名验证仍有效。'
             });
           } else {
             hints.push({
@@ -814,8 +819,7 @@
           } else if (tk.text) {
             txt.textContent = tk.text;
           } else {
-            txt.innerHTML = '<em>正文为空 — 这是 Opus 4.7 默认 display="omitted" 的预期形态；或反代剥离了思考正文。' +
-                            '本工具发请求时已自动 display:"summarized"，仍为空多半是反代行为。</em>';
+            txt.innerHTML = '<em>正文为空 — 本工具发请求时已带 display:"summarized"，仍为空说明该渠道未透出思考正文（反代或上游剥离）。</em>';
           }
           wrap.appendChild(txt);
           if (tk.signature) {
