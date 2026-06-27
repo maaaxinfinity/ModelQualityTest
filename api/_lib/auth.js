@@ -1,9 +1,11 @@
 const crypto = require('crypto');
+const QRCode = require('qrcode-svg');
 const { parseCookies, sendJson, setSessionCookie } = require('./http');
 const { ensureSchema, query } = require('./db');
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOTP_STEP_SECONDS = 30;
+const TOTP_DIGITS = 6;
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -96,26 +98,46 @@ function totpAt(secret, counter) {
     ((digest[offset + 1] & 0xff) << 16) |
     ((digest[offset + 2] & 0xff) << 8) |
     (digest[offset + 3] & 0xff)
-  ) % 1000000;
-  return String(code).padStart(6, '0');
+  ) % (10 ** TOTP_DIGITS);
+  return String(code).padStart(TOTP_DIGITS, '0');
 }
 
-function verifyTotp(secret, token, windowSize) {
+function verifyTotpWithCounter(secret, token, windowSize) {
   const clean = String(token || '').replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(clean)) return false;
+  if (!/^\d{6}$/.test(clean)) return null;
   const counter = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
   const window = windowSize == null ? 1 : windowSize;
   for (let offset = -window; offset <= window; offset++) {
-    const candidate = totpAt(secret, counter + offset);
-    if (crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(clean))) return true;
+    const matchedCounter = counter + offset;
+    const candidate = totpAt(secret, matchedCounter);
+    if (crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(clean))) {
+      return { token: clean, counter: matchedCounter };
+    }
   }
-  return false;
+  return null;
+}
+
+function verifyTotp(secret, token, windowSize) {
+  return !!verifyTotpWithCounter(secret, token, windowSize);
 }
 
 function otpauthUrl(displayName, secret) {
   const issuer = encodeURIComponent('ModelQualityTest');
   const label = encodeURIComponent(`ModelQualityTest:${displayName}`);
-  return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+  return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
+}
+
+function otpauthQrSvg(displayName, secret) {
+  const qr = new QRCode({
+    content: otpauthUrl(displayName, secret),
+    padding: 3,
+    width: 224,
+    height: 224,
+    color: '#111111',
+    background: '#ffffff',
+    ecl: 'M'
+  });
+  return qr.svg().replace(/^<\?xml[^>]*>\s*/i, '');
 }
 
 async function getUserFromRequest(req) {
@@ -156,9 +178,11 @@ module.exports = {
   getUserFromRequest,
   issueSession,
   otpauthUrl,
+  otpauthQrSvg,
   randomCode,
   randomId,
   requireAdmin,
   requireUser,
-  verifyTotp
+  verifyTotp,
+  verifyTotpWithCounter
 };

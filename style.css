@@ -1053,6 +1053,27 @@ pre.code {
   border-radius: 4px;
 }
 
+.totp-setup {
+  display: grid;
+  gap: 10px;
+}
+
+.qr-box {
+  width: min(224px, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 10px;
+}
+
+.qr-box svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .auth-grid {
   gap: 10px;
 }
@@ -1071,7 +1092,7 @@ pre.code {
   font-weight: 550;
 }
 
-.account-row button {
+.account-row button:first-of-type {
   margin-left: auto;
 }
 
@@ -1184,6 +1205,14 @@ pre.code {
 .app-locked .mini-log {
   width: min(100%, 620px);
   margin: 12px auto 0;
+}
+
+.app-locked .totp-setup {
+  justify-items: center;
+}
+
+.app-locked .qr-box {
+  border-radius: 2px;
 }
 
 .app-locked .warn-box {

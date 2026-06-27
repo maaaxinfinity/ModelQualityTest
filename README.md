@@ -13,6 +13,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
+- TOTP setup returns server-rendered QR SVG, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
 
 ## Local Development
 
@@ -71,7 +72,7 @@ npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
 
 Open the deployed site, bind the first TOTP account, and that user becomes the first administrator. Create invite codes from the admin panel for additional administrators.
 
-After the first admin login, click **同步价格表** once to seed `model_prices`. Vercel also runs `/api/cron/sync-prices` daily at 02:00 UTC.
+After the first admin login, click **Prices** once to seed `model_prices`. Vercel also runs `/api/cron/sync-prices` daily at 02:00 UTC.
 
 ## Verification
 
@@ -95,7 +96,7 @@ Database smoke test with a local PostgreSQL database:
 DATABASE_URL='postgresql://user@%2Fvar%2Frun%2Fpostgresql/dbname' PGSSLMODE=disable npm run test:db
 ```
 
-`test:db` verifies schema creation, price table writes, test-run logging, first-admin TOTP enrollment, invite-code enrollment, and TOTP login.
+`test:db` verifies schema creation, price table writes, test-run logging, first-admin TOTP enrollment, invite-code enrollment, TOTP replay rejection, 2FA rotation, and TOTP login.
 
 ## Security Notes
 

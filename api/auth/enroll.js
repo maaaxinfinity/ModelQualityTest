@@ -2,9 +2,10 @@ const { ensureSchema, query } = require('../_lib/db');
 const {
   generateTotpSecret,
   issueSession,
+  otpauthQrSvg,
   otpauthUrl,
   randomId,
-  verifyTotp
+  verifyTotpWithCounter
 } = require('../_lib/auth');
 const { readJson, sendJson, sendMethodNotAllowed } = require('../_lib/http');
 
@@ -57,6 +58,7 @@ async function startEnrollment(payload) {
       displayName,
       secret,
       otpauthUrl: otpauthUrl(displayName, secret),
+      qrSvg: otpauthQrSvg(displayName, secret),
       mode,
       expiresInSeconds: 600
     }
@@ -70,7 +72,8 @@ async function finishEnrollment(req, res, payload) {
   const found = await query('select * from auth_enrollments where id=$1 and expires_at > now()', [enrollmentId]);
   const enrollment = found.rows[0];
   if (!enrollment) return sendJson(res, 404, { error: 'enrollment_not_found' });
-  if (!verifyTotp(enrollment.totp_secret, token)) return sendJson(res, 401, { error: 'totp_invalid' });
+  const match = verifyTotpWithCounter(enrollment.totp_secret, token);
+  if (!match) return sendJson(res, 401, { error: 'totp_invalid' });
 
   const count = await userCount();
   if (enrollment.mode === 'bootstrap' && count > 0) return sendJson(res, 409, { error: 'bootstrap_already_claimed' });
@@ -83,10 +86,10 @@ async function finishEnrollment(req, res, payload) {
 
   const userId = randomId('usr');
   const inserted = await query(
-    `insert into app_users (id, display_name, role, totp_secret, created_by, last_login_at)
-     values ($1,$2,'admin',$3,$4,now())
+    `insert into app_users (id, display_name, role, totp_secret, last_totp_counter, created_by, last_login_at)
+     values ($1,$2,'admin',$3,$4,$5,now())
      returning id, display_name, role, created_at, last_login_at`,
-    [userId, enrollment.display_name, enrollment.totp_secret, createdBy]
+    [userId, enrollment.display_name, enrollment.totp_secret, match.counter, createdBy]
   );
   if (enrollment.invite_code) {
     await query('update invite_codes set used_count=used_count+1 where code=$1', [enrollment.invite_code]);

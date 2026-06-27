@@ -6,6 +6,7 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'smoke-test-session-s
 
 const { ensureSchema, query } = require('../api/_lib/db');
 const enroll = require('../api/auth/enroll');
+const twofa = require('../api/auth/2fa');
 const login = require('../api/auth/login');
 const invites = require('../api/admin/invites');
 const system = require('../api/admin/system');
@@ -25,17 +26,17 @@ function decodeBase32(secret) {
   return Buffer.from(bytes);
 }
 
-function totp(secret) {
-  const counter = Math.floor(Date.now() / 1000 / 30);
+function totp(secret, offset = 0) {
+  const counter = Math.floor(Date.now() / 1000 / 30) + offset;
   const msg = Buffer.alloc(8);
   msg.writeBigUInt64BE(BigInt(counter));
   const digest = crypto.createHmac('sha1', decodeBase32(secret)).update(msg).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
+  const truncationOffset = digest[digest.length - 1] & 0x0f;
   const code = (
-    ((digest[offset] & 0x7f) << 24) |
-    ((digest[offset + 1] & 0xff) << 16) |
-    ((digest[offset + 2] & 0xff) << 8) |
-    (digest[offset + 3] & 0xff)
+    ((digest[truncationOffset] & 0x7f) << 24) |
+    ((digest[truncationOffset + 1] & 0xff) << 16) |
+    ((digest[truncationOffset + 2] & 0xff) << 8) |
+    (digest[truncationOffset + 3] & 0xff)
   ) % 1000000;
   return String(code).padStart(6, '0');
 }
@@ -81,13 +82,16 @@ async function enrollUser(displayName, inviteCode) {
   assert.equal(start.statusCode, 200, start.body);
   const started = start.json();
   assert(started.secret);
+  assert(started.otpauthUrl.startsWith('otpauth://totp/'));
+  assert.match(started.qrSvg, /<svg[\s>]/);
 
+  const enrollmentToken = totp(started.secret);
   const finish = await call(enroll, 'POST', {
     enrollmentId: started.enrollmentId,
-    token: totp(started.secret)
+    token: enrollmentToken
   });
   assert.equal(finish.statusCode, 200, finish.body);
-  return { body: finish.json(), cookie: cookieFrom(finish) };
+  return { body: finish.json(), cookie: cookieFrom(finish), secret: started.secret, enrollmentToken };
 }
 
 async function main() {
@@ -112,12 +116,43 @@ async function main() {
   assert.equal(userRow.rows[0].n, 2);
   assert.equal(inviteRow.rows[0].used_count, 1);
 
+  const secondSecret = (await query('select totp_secret from app_users where display_name=$1', ['second-admin-smoke'])).rows[0].totp_secret;
+  const replayRes = await call(login, 'POST', {
+    displayName: 'second-admin-smoke',
+    token: second.enrollmentToken
+  });
+  assert.equal(replayRes.statusCode, 401, replayRes.body);
+
   const loginRes = await call(login, 'POST', {
     displayName: 'second-admin-smoke',
-    token: totp((await query('select totp_secret from app_users where display_name=$1', ['second-admin-smoke'])).rows[0].totp_secret)
+    token: totp(secondSecret, 1)
   });
   assert.equal(loginRes.statusCode, 200, loginRes.body);
   assert(cookieFrom(loginRes).startsWith('mqt_session='));
+
+  const rotateStart = await call(twofa, 'POST', { action: 'start' }, second.cookie);
+  assert.equal(rotateStart.statusCode, 200, rotateStart.body);
+  const rotateSetup = rotateStart.json();
+  assert(rotateSetup.secret);
+  assert.match(rotateSetup.qrSvg, /<svg[\s>]/);
+  const rotateConfirm = await call(twofa, 'POST', {
+    action: 'confirm',
+    enrollmentId: rotateSetup.enrollmentId,
+    token: totp(rotateSetup.secret)
+  }, second.cookie);
+  assert.equal(rotateConfirm.statusCode, 200, rotateConfirm.body);
+
+  const oldSecretLogin = await call(login, 'POST', {
+    displayName: 'second-admin-smoke',
+    token: totp(secondSecret, 1)
+  });
+  assert.equal(oldSecretLogin.statusCode, 401, oldSecretLogin.body);
+
+  const newSecretLogin = await call(login, 'POST', {
+    displayName: 'second-admin-smoke',
+    token: totp(rotateSetup.secret, 1)
+  });
+  assert.equal(newSecretLogin.statusCode, 200, newSecretLogin.body);
 
   const systemRes = await call(system, 'GET', null, admin.cookie);
   assert.equal(systemRes.statusCode, 200, systemRes.body);

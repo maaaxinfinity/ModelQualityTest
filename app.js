@@ -295,14 +295,16 @@
         <div class="account-row">
           <span>${escapeHtml(status.user.displayName)}</span>
           <span>${escapeHtml(status.user.role)}</span>
+          <button type="button" id="rotate-2fa">2FA</button>
           <button type="button" id="logout">Logout</button>
         </div>`;
+      el('rotate-2fa').addEventListener('click', startTotpRotation);
       el('logout').addEventListener('click', async () => {
         await api('/api/auth/logout', { method: 'POST', body: '{}' });
         sessionUser = null;
         refreshAuth();
       });
-      $authFlow.innerHTML = '';
+      $authFlow.innerHTML = '<div id="twofa-output" class="mini-log"></div>';
       if (status.insecureDevSecret) {
         $authFlow.innerHTML += '<div class="warn-box">SESSION_SECRET</div>';
       }
@@ -351,13 +353,7 @@
           inviteCode: el('invite-code').value
         })
       });
-      out.innerHTML = `
-        <div>Secret：<code>${escapeHtml(data.secret)}</code></div>
-        <pre class="code">${escapeHtml(data.otpauthUrl)}</pre>
-        <div class="auth-form">
-          <input id="enroll-token" type="text" inputmode="numeric" placeholder="TOTP" autocomplete="one-time-code" />
-          <button id="finish-enroll" type="button">Finish</button>
-        </div>`;
+      out.innerHTML = renderTotpSetup(data, 'enroll-token', 'finish-enroll', 'Finish');
       el('finish-enroll').addEventListener('click', async () => {
         try {
           await api('/api/auth/enroll', {
@@ -372,6 +368,46 @@
     } catch (e) {
       out.textContent = `Enroll failed: ${e.message}`;
     }
+  }
+
+  async function startTotpRotation() {
+    const out = el('twofa-output');
+    if (!out) return;
+    try {
+      const data = await api('/api/auth/2fa', { method: 'POST', body: JSON.stringify({ action: 'start' }) });
+      out.innerHTML = renderTotpSetup(data, 'rotate-token', 'finish-rotate-2fa', 'Save');
+      el('finish-rotate-2fa').addEventListener('click', async () => {
+        try {
+          await api('/api/auth/2fa', {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'confirm',
+              enrollmentId: data.enrollmentId,
+              token: el('rotate-token').value
+            })
+          });
+          out.innerHTML = '<div>OK</div>';
+        } catch (e) {
+          out.innerHTML += `<div class="warn-box">Failed: ${escapeHtml(e.message)}</div>`;
+        }
+      });
+    } catch (e) {
+      out.textContent = `Failed: ${e.message}`;
+    }
+  }
+
+  function renderTotpSetup(data, inputId, buttonId, buttonText) {
+    const qr = data.qrSvg ? `<div class="qr-box">${data.qrSvg}</div>` : '';
+    return `
+      <div class="totp-setup">
+        ${qr}
+        <code>${escapeHtml(data.secret || '')}</code>
+        <pre class="code">${escapeHtml(data.otpauthUrl || '')}</pre>
+        <div class="auth-form">
+          <input id="${inputId}" type="text" inputmode="numeric" placeholder="TOTP" autocomplete="one-time-code" />
+          <button id="${buttonId}" type="button">${escapeHtml(buttonText)}</button>
+        </div>
+      </div>`;
   }
 
   async function createInvite() {

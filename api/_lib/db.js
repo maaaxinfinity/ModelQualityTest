@@ -50,6 +50,7 @@ async function ensureSchema() {
         display_name text not null unique,
         role text not null default 'admin',
         totp_secret text not null,
+        last_totp_counter bigint,
         created_at timestamptz not null default now(),
         created_by text references app_users(id),
         last_login_at timestamptz
@@ -57,6 +58,7 @@ async function ensureSchema() {
 
       create table if not exists auth_enrollments (
         id text primary key,
+        user_id text references app_users(id),
         display_name text not null,
         totp_secret text not null,
         invite_code text,
@@ -121,6 +123,9 @@ async function ensureSchema() {
       create index if not exists model_prices_lookup_idx on model_prices(model_group, model_alias);
       create index if not exists model_prices_synced_at_idx on model_prices(synced_at desc);
     `);
+    await query('alter table app_users add column if not exists last_totp_counter bigint');
+    await query('alter table auth_enrollments add column if not exists user_id text references app_users(id)');
+    await query('create index if not exists auth_enrollments_user_mode_idx on auth_enrollments(user_id, mode, created_at desc)');
   })();
   return schemaReady;
 }
