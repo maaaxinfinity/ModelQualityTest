@@ -3,163 +3,150 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Claude 渠道检测工具</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233f6ad8'/%3E%3Ctext x='50%25' y='58%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='34' font-weight='700' fill='white'%3EC%3C/text%3E%3C/svg%3E" />
+  <title>Model Quality Test</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233f6ad8'/%3E%3Ctext x='50%25' y='58%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='30' font-weight='700' fill='white'%3EMQ%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="app-locked">
   <header class="topbar">
     <div class="topbar-inner">
-      <h1>Claude 渠道检测工具</h1>
-      <span class="subtitle">通过多题探测判定背后究竟是不是 Claude / 走的什么渠道</span>
+      <h1>Model Quality Test</h1>
     </div>
   </header>
 
   <main class="container">
-    <!-- ============ 配置面板 ============ -->
-    <section class="panel" id="config-panel">
+    <section class="panel" id="auth-panel">
       <header class="panel-header">
-        <h2>1. 配置接口</h2>
+        <h2>Auth</h2>
+        <span class="run-status" id="auth-status">检查登录状态...</span>
+      </header>
+      <div class="panel-body auth-grid">
+        <div class="auth-box" id="auth-current"></div>
+        <div class="auth-box" id="auth-flow"></div>
+        <div class="auth-box admin-only" id="admin-box" hidden>
+          <div class="section-title">管理员</div>
+          <div class="inline-actions">
+            <button id="create-invite" type="button">生成管理员邀请码</button>
+            <button id="system-status" type="button">系统状态</button>
+            <button id="sync-prices" type="button">同步价格表</button>
+            <button id="refresh-logs" type="button">刷新日志</button>
+            <button id="export-logs" type="button">导出日志 CSV</button>
+          </div>
+          <div class="mini-log" id="admin-output"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel protected-section" id="config-panel">
+      <header class="panel-header">
+        <h2>Config</h2>
         <button class="link-btn" id="toggle-config" type="button">收起 ▾</button>
       </header>
 
       <div class="panel-body" id="config-body">
+        <div class="group-tabs" id="group-tabs"></div>
         <div class="grid-2">
           <label class="field">
-            <span>预设</span>
-            <select id="cfg-preset">
-              <option value="proxy" selected>通用代理 / 4Router / new-api（默认）</option>
-              <option value="anthropic">Anthropic 官方直连</option>
-              <option value="openai-compat">OpenAI 兼容代理（/v1/chat/completions 类）</option>
-              <option value="custom">自定义</option>
+            <span>模型组</span>
+            <select id="cfg-group">
+              <option value="OpenAI">OpenAI</option>
+              <option value="Anthropic">Anthropic</option>
+              <option value="Google">Google</option>
+              <option value="Sakana">Sakana</option>
+              <option value="Image">Image</option>
             </select>
-            <small>选预设会自动填充下面的默认值；改任何一项即可。</small>
           </label>
 
           <label class="field">
             <span>Base URL</span>
-            <input type="text" id="cfg-baseUrl" placeholder="https://4Router.net" value="https://4Router.net" />
-            <small>结尾不要带 <code>/v1/messages</code>，程序会自动拼接。</small>
+            <input type="text" id="cfg-baseUrl" value="https://api.openai.com" />
           </label>
 
           <label class="field">
             <span>API Key</span>
-            <input type="password" id="cfg-apiKey" placeholder="sk-... 渠道给的 key" autocomplete="off" />
-            <small>仅存于你本地浏览器，不会上传到任何第三方。</small>
+            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="该模型组的 key" />
           </label>
 
           <label class="field">
             <span>模型</span>
-            <input type="text" id="cfg-model" placeholder="claude-opus-4-7" value="claude-opus-4-7" list="model-suggestions" />
+            <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" />
             <datalist id="model-suggestions">
-              <option value="claude-fable-5"></option>
-              <option value="claude-opus-4-8"></option>
-              <option value="claude-opus-4-7"></option>
+              <option value="gpt-5.5"></option>
+              <option value="gpt-5.5-pro"></option>
+              <option value="claude-opus-4.8"></option>
               <option value="claude-sonnet-4-6"></option>
-              <option value="claude-haiku-4-5-20251001"></option>
-              <option value="claude-3-5-sonnet-20241022"></option>
-              <option value="claude-3-5-haiku-20241022"></option>
-              <option value="claude-3-opus-20240229"></option>
-              <option value="gpt-4o"></option>
-              <option value="gpt-4o-mini"></option>
+              <option value="gemini-3.1-pro-preview"></option>
+              <option value="gemini-3-flash-preview"></option>
+              <option value="fugu-ultra"></option>
+              <option value="gpt-image-2"></option>
             </datalist>
-            <small>请填写后端真正接受的模型 ID。</small>
           </label>
 
           <label class="field">
             <span>认证头格式</span>
             <select id="cfg-authMode">
-              <option value="bearer" selected>Authorization: Bearer（多数代理 / 浏览器友好）</option>
-              <option value="x-api-key">x-api-key（Anthropic 原生）</option>
-              <option value="both">同时发送（最大兼容）</option>
+              <option value="bearer">Authorization: Bearer</option>
+              <option value="x-api-key">x-api-key</option>
+              <option value="both">两者都发</option>
             </select>
-            <small>浏览器直连时请优先 Bearer。本地中转模式下两者皆可。</small>
           </label>
 
           <label class="field">
-            <span>请求方式</span>
-            <select id="cfg-transport">
-              <option value="auto" selected>自动（检测到本地中转优先用）</option>
-              <option value="proxy">仅本地中转（python server.py，看到完整响应头）</option>
-              <option value="direct">仅浏览器直连（响应头受目标站白名单限制）</option>
-            </select>
-            <small id="transport-hint">未检测中转可用性…</small>
+            <span>max output tokens</span>
+            <input type="number" id="cfg-maxTokens" value="1024" min="16" max="64000" />
           </label>
 
           <label class="field">
-            <span>max_tokens（默认）</span>
-            <input type="number" id="cfg-maxTokens" value="1024" min="16" max="8192" />
-            <small>单题可在 questions.js 里覆盖。</small>
+            <span>请求超时 (ms)</span>
+            <input type="number" id="cfg-timeout" value="120000" min="1000" max="900000" />
+          </label>
+
+          <label class="field image-only">
+            <span>Image n</span>
+            <input type="number" id="cfg-image-n" value="1" min="1" max="10" />
+          </label>
+
+          <label class="field image-only">
+            <span>Image quality</span>
+            <select id="cfg-image-quality">
+              <option value="low">low</option>
+              <option value="medium" selected>medium</option>
+              <option value="high">high</option>
+            </select>
+          </label>
+
+          <label class="field image-only">
+            <span>Image size</span>
+            <input type="text" id="cfg-image-size" value="1024x1024" />
+          </label>
+
+          <label class="field">
+            <span>题目之间延迟 (ms)</span>
+            <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
+          </label>
+
+          <label class="field full">
+            <span>全局 system / instructions（可选）</span>
+            <textarea id="cfg-system" rows="2"></textarea>
+          </label>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="cfg-remember" />
+            <span>记住当前模型组配置（localStorage，含 API Key）</span>
           </label>
         </div>
-
-        <details class="advanced">
-          <summary>高级 / 头部细节</summary>
-          <div class="grid-2">
-            <label class="field">
-              <span>anthropic-version 头</span>
-              <input type="text" id="cfg-version" placeholder="留空则不发送" value="" />
-              <small>Anthropic 官方直连填 <code>2023-06-01</code>；代理多数不需要，留空避开 CORS。</small>
-            </label>
-
-            <label class="checkbox-row" style="grid-column:1/-1">
-              <input type="checkbox" id="cfg-dangerousBrowser" />
-              <span>发送 <code>anthropic-dangerous-direct-browser-access: true</code>（Anthropic 官方浏览器直连需要）</span>
-            </label>
-
-            <label class="checkbox-row" style="grid-column:1/-1">
-              <input type="checkbox" id="cfg-impersonateCc" checked />
-              <span>
-                <strong>伪装成 Claude Code 客户端</strong>
-                （绕过 <code>sub2api</code> / <code>claude-relay-service</code> 的 "this group only allows Claude Code clients" 拦截）
-              </span>
-            </label>
-            <div class="field full" style="grid-column:1/-1;margin-top:-6px">
-              <small>
-                开启后自动改写：<code>User-Agent=claude-cli/&lt;ver&gt;</code> + <code>X-App: cli</code> + <code>anthropic-beta</code> + <code>anthropic-version</code>；
-                把 <code>body.system</code> 改成数组（首条塞官方 CC 模板），并生成合法的 <code>metadata.user_id</code>。
-                <strong>必须走本地中转</strong>（<code>python server.py</code>）—— 浏览器直连模式下 fetch 禁止改 <code>User-Agent</code>，伪装无效。
-              </small>
-            </div>
-
-            <label class="field">
-              <span>题目之间延迟 (ms)</span>
-              <input type="number" id="cfg-delay" value="400" min="0" max="10000" />
-            </label>
-            <label class="field">
-              <span>请求超时 (ms)</span>
-              <input type="number" id="cfg-timeout" value="600000" min="1000" max="1800000" />
-              <small>Claude Code 复杂思考（thinking=max / opus 推理）可达 5–10 分钟，默认 10 分钟较稳。</small>
-            </label>
-            <label class="field full">
-              <span>额外请求头（JSON）</span>
-              <textarea id="cfg-extraHeaders" rows="3" placeholder='{"x-custom-token":"abc"}'></textarea>
-              <small>会与默认头合并。直连模式下，发送非标准头需要目标 API 在响应里放行；中转模式无此限制。</small>
-            </label>
-            <label class="field full">
-              <span>全局 system（可选）</span>
-              <textarea id="cfg-system" rows="3" placeholder="不填则不发 system 字段"></textarea>
-              <small>若题目自带 system，则该题不使用全局 system。</small>
-            </label>
-            <label class="checkbox-row">
-              <input type="checkbox" id="cfg-remember" />
-              <span>记住配置（保存到本浏览器 localStorage，含 API Key）</span>
-            </label>
-          </div>
-        </details>
       </div>
     </section>
 
-    <!-- ============ 运行按钮区 ============ -->
-    <section class="run-bar">
-      <button class="primary" id="run-all" type="button">▶ 全部运行</button>
+    <section class="run-bar protected-section">
+      <button class="primary" id="run-all" type="button">▶ 运行当前组</button>
       <button id="stop" type="button" disabled>■ 停止</button>
       <button id="clear-results" type="button">清空结果</button>
-      <button id="export-results" type="button">导出 JSON</button>
+      <button id="export-results" type="button">导出本页 JSON</button>
       <span class="run-bar-spacer"></span>
-      <label class="run-bar-toggle" title="同时并发执行的题目数；过高可能触发上游限速">
+      <label class="run-bar-toggle">
         <span>并发数</span>
-        <input type="number" id="opt-concurrency" min="1" max="20" value="3" style="width:54px;padding:2px 6px" />
+        <input type="number" id="opt-concurrency" min="1" max="20" value="2" style="width:54px;padding:2px 6px" />
       </label>
       <label class="run-bar-toggle">
         <input type="checkbox" id="opt-collapse-after" />
@@ -168,33 +155,22 @@
       <span class="run-status" id="run-status">就绪</span>
     </section>
 
-    <!-- ============ 测试题卡片网格 ============ -->
-    <section class="qsection" id="qsection">
+    <section class="qsection protected-section" id="qsection">
       <header class="qsection-header">
-        <h2>2. 测试题（<span id="q-count">0</span> 题）</h2>
+        <h2>Tests <span id="q-count">0</span></h2>
         <div class="qsection-actions">
           <button class="link-btn" id="expand-all" type="button">全部展开</button>
           <button class="link-btn" id="collapse-all" type="button">全部收起</button>
-          <select id="filter-category" title="按分类过滤">
+          <select id="filter-category">
             <option value="">全部分类</option>
           </select>
         </div>
       </header>
-      <div class="qgrid" id="qgrid"><!-- JS 渲染 --></div>
+      <div class="qgrid" id="qgrid"></div>
     </section>
-
-    <footer class="footnote">
-      <p>
-        题目模板在 <code>questions.js</code> 中维护；按字段说明追加对象即可。<br />
-        想看到 4Router 等渠道的全部响应头（<code>X-4router-Version</code> / <code>X-Amzn-Requestid</code> / <code>X-New-Api-Version</code> 等），
-        请用 <code>python server.py</code> 启动本地中转，浏览器打开 <code>http://127.0.0.1:8765/</code>。
-        页面会自动走中转，所见即所得，等同 curl。
-      </p>
-    </footer>
   </main>
 
-  <!-- 注意先 questions.js 后 app.js；?v 用作缓存击穿 -->
-  <script src="questions.js?v=5"></script>
-  <script src="app.js?v=10"></script>
+  <script src="questions.js?v=6"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

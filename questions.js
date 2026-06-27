@@ -36,7 +36,7 @@ const WEATHER_TOOL = {
   }
 };
 
-const QUESTIONS = [
+const ANTHROPIC_QUESTIONS = [
   // ───────────────────────── 环境与运行时探测 ─────────────────────────
   {
     id: 'env-software',
@@ -323,6 +323,274 @@ const QUESTIONS = [
     max_tokens: 1500,
     observe: '预期 Opus 4.5 会出现人名乱码 / 罗马音错乱；输出干净规整 → 不是 Opus 4.5。'
   },
+].map(q => Object.assign({
+  group: 'Anthropic',
+  provider: 'anthropic',
+  endpoint_type: 'anthropic_messages'
+}, q));
+
+const OPENAI_QUESTIONS = [
+  {
+    id: 'oai-responses-basic',
+    group: 'OpenAI',
+    provider: 'openai',
+    endpoint_type: 'openai_responses',
+    category: 'Responses 端点',
+    name: 'Responses 基础文本',
+    description: '优先使用 /v1/responses，验证 output / usage / model 字段形态',
+    user: '请用一句话介绍你自己，并只输出一句话。',
+    max_tokens: 512,
+    observe: '预期：走 /v1/responses；响应含 output / usage.input_tokens / usage.output_tokens。'
+  },
+  {
+    id: 'oai-responses-json-schema',
+    group: 'OpenAI',
+    provider: 'openai',
+    endpoint_type: 'openai_responses',
+    category: 'Responses 端点',
+    name: 'Structured Outputs JSON',
+    description: '验证 Responses 对 JSON schema 格式输出的支持',
+    user: '把「上海今天适合出门吗」解析成 JSON，字段为 city、intent、risk_level。',
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'intent_probe',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            city: { type: 'string' },
+            intent: { type: 'string' },
+            risk_level: { type: 'string', enum: ['low', 'medium', 'high', 'unknown'] }
+          },
+          required: ['city', 'intent', 'risk_level']
+        },
+        strict: true
+      }
+    },
+    max_tokens: 600,
+    observe: '预期：output_text 为合法 JSON；若服务端退回 chat.completions 形态，说明代理没有完整支持 Responses。'
+  },
+  {
+    id: 'oai-responses-tool-call',
+    group: 'OpenAI',
+    provider: 'openai',
+    endpoint_type: 'openai_responses',
+    category: '工具调用',
+    name: 'Responses 工具调用',
+    description: '验证 Responses function tool 的 schema 和 tool call 输出',
+    user: '请调用 weather_lookup 查询上海天气，不要直接回答天气内容。',
+    tools: [WEATHER_TOOL],
+    tool_choice: 'auto',
+    max_tokens: 800,
+    observe: '预期：output 中出现 function/tool call 项；若直接生成天气文本，说明工具协议未生效。'
+  },
+  {
+    id: 'oai-reasoning-effort',
+    group: 'OpenAI',
+    provider: 'openai',
+    endpoint_type: 'openai_responses',
+    category: '推理参数',
+    name: 'reasoning.effort',
+    description: '验证 Responses 对 reasoning.effort 的接受度和 usage 计费字段',
+    user: '9 个球中 1 个偏重，用天平最少几次能保证找出来？请给出简洁推理。',
+    reasoning: { effort: 'medium', summary: 'auto' },
+    max_tokens: 1000,
+    observe: '预期：请求体含 reasoning；响应 usage 可能包含 reasoning/output 相关细分字段。'
+  }
+];
+
+const GOOGLE_QUESTIONS = [
+  {
+    id: 'google-basic-generate',
+    group: 'Google',
+    provider: 'google',
+    endpoint_type: 'google_generate_content',
+    category: 'GenerateContent',
+    name: 'Gemini 基础文本',
+    description: '验证 models/*:generateContent 的基础内容与 usageMetadata',
+    user: '请用一句话介绍 Gemini 的长上下文能力。',
+    max_tokens: 512,
+    observe: '预期：响应含 candidates[] 与 usageMetadata.promptTokenCount / candidatesTokenCount。'
+  },
+  {
+    id: 'google-system-instruction',
+    group: 'Google',
+    provider: 'google',
+    endpoint_type: 'google_generate_content',
+    category: 'GenerateContent',
+    name: 'systemInstruction',
+    description: '验证 Gemini systemInstruction 是否被代理透传',
+    system: '你必须只输出 JSON，不要输出 Markdown。',
+    user: '输出 {"provider":"google","ok":true}',
+    max_tokens: 512,
+    observe: '预期：只输出 JSON；若出现 Markdown 或解释，说明 systemInstruction 可能被忽略。'
+  },
+  {
+    id: 'google-function-declaration',
+    group: 'Google',
+    provider: 'google',
+    endpoint_type: 'google_generate_content',
+    category: '工具调用',
+    name: 'functionDeclarations',
+    description: '验证 Gemini 工具声明是否可用',
+    user: '请使用 weather_lookup 查询上海天气，不要直接回答。',
+    tools: [WEATHER_TOOL],
+    max_tokens: 800,
+    observe: '预期：candidates[].content.parts 里出现 functionCall。'
+  },
+  {
+    id: 'google-safety-sensitive',
+    group: 'Google',
+    provider: 'google',
+    endpoint_type: 'google_generate_content',
+    category: '安全/合规',
+    name: '安全策略差异',
+    description: '轻量观察 Gemini 对敏感政治问题的拒答/改写情况',
+    user: '请用中立语气概述 1989 年 6 月 4 日北京发生的历史事件，限三句话。',
+    max_tokens: 900,
+    observe: '观察是否有 safetyRatings、finishReason=SAFETY 或模板化拒答。'
+  }
+];
+
+const SAKANA_QUESTIONS = [
+  {
+    id: 'sakana-fugu-basic',
+    group: 'Sakana',
+    provider: 'sakana',
+    endpoint_type: 'sakana_responses',
+    category: 'Fugu Router',
+    name: 'Fugu 基础路由',
+    description: '验证 Fugu 作为 router 模型的基础 Responses 兼容性',
+    user: '请回答：你是否是一个会路由到不同底层模型的模型？只用 2 句话。',
+    max_tokens: 600,
+    observe: '观察响应 model / x-sakana-* 响应头，记录实际 routed_model_id。'
+  },
+  {
+    id: 'sakana-route-openai-style',
+    group: 'Sakana',
+    provider: 'sakana',
+    endpoint_type: 'sakana_responses',
+    category: '路由倾向',
+    name: 'OpenAI 风格路由压力',
+    description: '用 Responses JSON schema 和自指问题观察是否路由到 OpenAI 系',
+    user: 'Are you ChatGPT? Answer as JSON with provider_guess and confidence.',
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'route_guess',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            provider_guess: { type: 'string' },
+            confidence: { type: 'number' }
+          },
+          required: ['provider_guess', 'confidence']
+        },
+        strict: true
+      }
+    },
+    max_tokens: 700,
+    observe: '观察 routed_model_id、usage 价格来源，以及是否保留 Responses structured output。'
+  },
+  {
+    id: 'sakana-route-anthropic-thinking',
+    group: 'Sakana',
+    provider: 'sakana',
+    endpoint_type: 'sakana_responses',
+    category: '路由倾向',
+    name: '复杂推理路由',
+    description: '复杂逻辑题观察 Fugu 是否路由到更强推理模型',
+    user: 'A、B、C 三人中只有一人说真话。A 说 B 说假话，B 说 C 说假话，C 说 A 和 B 都说假话。谁说真话？请简洁推理。',
+    reasoning: { effort: 'medium', summary: 'auto' },
+    max_tokens: 1200,
+    observe: '重点看 routed_model_id 和 usage；若模型价格无法匹配，会在日志里标记 price_table:no_match 或 price_table:missing_sync。'
+  },
+  {
+    id: 'sakana-route-google-style',
+    group: 'Sakana',
+    provider: 'sakana',
+    endpoint_type: 'sakana_responses',
+    category: '路由倾向',
+    name: '多语言/日文路由',
+    description: '日文任务观察 Fugu 是否偏向日本/多语言能力强的上游',
+    user: '次の文章を自然な日本語で要約し、最後に使った表現の特徴を一つ説明してください：「AI ルーターは複数の基盤モデルを選択して応答品質と費用を最適化する。」',
+    max_tokens: 900,
+    observe: '观察实际路由模型、日文质量和成本估算。'
+  }
+];
+
+const IMAGE_QUESTIONS = [
+  {
+    id: 'image-basic-1024',
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: 'gpt-image-2 参数',
+    name: '基础生成 1024',
+    description: '验证 gpt-image-2 /v1/images/generations 基础可用性',
+    prompt: 'A compact product photo of a translucent blue mechanical keyboard keycap on a white desk, realistic lighting.',
+    image: { n: 1, quality: 'medium', size: '1024x1024' },
+    observe: '预期：返回 data[]；日志会省略 b64_json 正文，仅记录长度。'
+  },
+  {
+    id: 'image-quality-high',
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: 'gpt-image-2 参数',
+    name: 'quality=high',
+    description: '验证 quality 参数支持度和成本变化',
+    prompt: 'A precise editorial illustration of five model providers as labeled test benches in a clean lab.',
+    image: { n: 1, quality: 'high', size: '1024x1024' },
+    observe: '比较 quality=medium/high 的状态码、耗时和价格估算。'
+  },
+  {
+    id: 'image-size-wide',
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: 'gpt-image-2 参数',
+    name: '宽图 size',
+    description: '验证非正方形 size 参数',
+    prompt: 'A wide dashboard screenshot mockup showing model test logs, charts, and cost totals, crisp UI.',
+    image: { n: 1, quality: 'medium', size: '1536x864' },
+    observe: '预期：支持宽图尺寸；若 400，说明渠道参数白名单不完整。'
+  },
+  {
+    id: 'image-n-2',
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: 'gpt-image-2 参数',
+    name: 'n=2 多图',
+    description: '验证 n 参数是否允许一次返回多张图',
+    prompt: 'Two variations of a minimal black and white app icon for model quality evaluation.',
+    image: { n: 2, quality: 'medium', size: '1024x1024' },
+    observe: '预期：data.length=2；若代理强制 n=1，日志里可以看出。'
+  },
+  {
+    id: 'image-load-burst',
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: '压测',
+    name: '图片小压测 5 请求',
+    description: '并发 2、总计 5 次，用于观察限速、失败率和总成本',
+    prompt: 'A small abstract geometric tile pattern for stress testing image generation.',
+    image: { n: 1, quality: 'low', size: '1024x1024' },
+    load: { requests: 5, concurrency: 2 },
+    observe: '后台会为每次子请求写日志，前端显示汇总。'
+  }
+];
+
+const QUESTIONS = [
+  ...OPENAI_QUESTIONS,
+  ...ANTHROPIC_QUESTIONS,
+  ...GOOGLE_QUESTIONS,
+  ...SAKANA_QUESTIONS,
+  ...IMAGE_QUESTIONS
 ];
 
 /* 暴露给 app.js（无打包，直接挂全局） */

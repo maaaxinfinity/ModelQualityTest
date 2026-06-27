@@ -1,0 +1,102 @@
+# Model Quality Test
+
+Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, Sakana, and Image. The app is designed for Vercel deployment with PostgreSQL-backed logs and TOTP-only admin access.
+
+## Features
+
+- OpenAI tests use the Responses endpoint by default.
+- Anthropic tests keep the existing Claude channel and thinking probes.
+- Google tests target Gemini `models/*:generateContent`.
+- Sakana tests target Fugu through an OpenAI-compatible Responses shape.
+- Image tests target `gpt-image-2` and cover `n`, `quality`, `size`, and a small burst load test.
+- Every test run is logged to PostgreSQL and can be exported from the admin panel.
+- Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
+- Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
+- First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
+
+## Local Development
+
+```bash
+npm install
+npm run check
+npm run preflight
+npm run test:logic
+npx vercel dev
+```
+
+Required environment variables:
+
+```bash
+DATABASE_URL=postgres://...
+SESSION_SECRET=replace-with-a-long-random-secret
+```
+
+`DATABASE_URL` is required because auth, logs, and exports are database-backed. The API lazily creates the required tables, and the same DDL is also available in `schema.sql`.
+
+## Deployment
+
+Vercel does not provide the old built-in Vercel Postgres product as a normal new
+database path. Use a Vercel Marketplace PostgreSQL integration such as Neon, or
+bring an external PostgreSQL database and set `DATABASE_URL`.
+
+Generate a Vercel Account Access Token from
+`https://vercel.com/account/tokens`, then use it with the target team scope:
+
+```bash
+export VERCEL_TOKEN=...
+export VERCEL_SCOPE=your-team-slug
+npx vercel link --yes --project model-quality-test --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+npx vercel install neon --name model-quality-test-db --environment production --environment preview --environment development --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+```
+
+Configure:
+
+- `DATABASE_URL`: PostgreSQL connection string.
+- `SESSION_SECRET`: HMAC secret for signed session cookies.
+- Optional `CRON_SECRET`: protects the Vercel cron endpoint. Vercel Cron sends it as a bearer token when configured.
+- Optional `PGSSLMODE=disable` for local non-SSL PostgreSQL.
+
+When adding `CRON_SECRET` or other header-facing secrets through stdin, avoid a
+trailing newline:
+
+```bash
+printf '%s' "$CRON_SECRET" | npx vercel env add CRON_SECRET production --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+```
+
+Deploy:
+
+```bash
+npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+```
+
+Open the deployed site, bind the first TOTP account, and that user becomes the first administrator. Create invite codes from the admin panel for additional administrators.
+
+After the first admin login, click **同步价格表** once to seed `model_prices`. Vercel also runs `/api/cron/sync-prices` daily at 02:00 UTC.
+
+## Verification
+
+Syntax and logic checks:
+
+```bash
+npm run check
+npm run preflight
+npm run test:logic
+```
+
+Strict deployment preflight:
+
+```bash
+DATABASE_URL=postgres://... SESSION_SECRET=... npm run preflight -- --strict-env
+```
+
+Database smoke test with a local PostgreSQL database:
+
+```bash
+DATABASE_URL='postgresql://user@%2Fvar%2Frun%2Fpostgresql/dbname' PGSSLMODE=disable npm run test:db
+```
+
+`test:db` verifies schema creation, price table writes, test-run logging, first-admin TOTP enrollment, invite-code enrollment, and TOTP login.
+
+## Security Notes
+
+The app is not intended to be fully public. Server APIs require a signed session, and admin-only endpoints require an admin role. API keys are entered per browser session and sent to the backend only for the requested model test; they are not stored in PostgreSQL logs.

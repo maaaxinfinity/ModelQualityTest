@@ -1,0 +1,18 @@
+{
+  "name": "model-quality-test",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Multi-provider model quality and channel probe with Vercel APIs, PostgreSQL logs, TOTP auth, and cost estimates.",
+  "scripts": {
+    "check": "node --check app.js && node --check questions.js && find api -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "preflight": "node tests/preflight.js",
+    "test:logic": "node tests/logic.test.js",
+    "test:db": "node tests/db-smoke.js && node tests/auth-smoke.js && node tests/run-test-smoke.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "vercel": "^54.18.0"
+  }
+}
