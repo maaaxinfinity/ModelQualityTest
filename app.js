@@ -194,7 +194,7 @@
       $qgrid.appendChild(buildCard(q));
     }
     $qCount.textContent = String(qs.length);
-    $filterCategory.innerHTML = '<option value="">全部分类</option>' +
+    $filterCategory.innerHTML = '<option value="">All</option>' +
       [...cats].map((cat) => `<option value="${escapeAttr(cat)}">${escapeHtml(cat)}</option>`).join('');
   }
 
@@ -209,7 +209,7 @@
         <span class="tag subtle">${escapeHtml(q.category || '')}</span>
         <span class="qcard-name">${escapeHtml(q.name || q.id)}</span>
         <div class="qcard-actions">
-          <button type="button" class="qcard-run">▶ 运行</button>
+          <button type="button" class="qcard-run">▶ Run</button>
           <button type="button" class="qcard-expand">▾</button>
         </div>
       </div>
@@ -280,43 +280,45 @@
       sessionUser = status.user;
       renderAuth(status);
     } catch (e) {
-      $authStatus.textContent = '认证服务不可用';
+      $authStatus.textContent = 'Offline';
       $authCurrent.textContent = e.message;
     }
   }
 
   function renderAuth(status) {
-    $authStatus.textContent = status.user ? status.user.displayName : '未登录';
+    $authStatus.textContent = status.user ? status.user.displayName : '';
     document.body.classList.toggle('app-locked', !status.user);
     document.body.classList.toggle('authed', !!status.user);
     $adminBox.hidden = !(status.user && status.user.role === 'admin');
     if (status.user) {
       $authCurrent.innerHTML = `
-        <div class="section-title">Session</div>
-        <div>${escapeHtml(status.user.displayName)} · ${escapeHtml(status.user.role)}</div>
-        <button type="button" id="logout">退出登录</button>`;
+        <div class="account-row">
+          <span>${escapeHtml(status.user.displayName)}</span>
+          <span>${escapeHtml(status.user.role)}</span>
+          <button type="button" id="logout">Logout</button>
+        </div>`;
       el('logout').addEventListener('click', async () => {
         await api('/api/auth/logout', { method: 'POST', body: '{}' });
         sessionUser = null;
         refreshAuth();
       });
-      $authFlow.innerHTML = '<div class="section-title">Admin</div>';
+      $authFlow.innerHTML = '';
       if (status.insecureDevSecret) {
         $authFlow.innerHTML += '<div class="warn-box">SESSION_SECRET</div>';
       }
       return;
     }
-    $authCurrent.innerHTML = '<div class="section-title">Session</div><div>—</div>';
+    $authCurrent.innerHTML = '';
     $authFlow.innerHTML = `
-      <div class="section-title">${status.setupRequired ? 'Setup' : 'Login'}</div>
+      <div class="auth-title">Model Quality Test</div>
       <div class="auth-form">
-        <input id="auth-name" type="text" placeholder="显示名 / 登录名" />
-        <input id="auth-token" type="text" inputmode="numeric" placeholder="TOTP 6 位验证码（登录用）" />
-        <button id="login-btn" type="button">登录</button>
+        <input id="auth-name" type="text" placeholder="Name" autocomplete="username" />
+        <input id="auth-token" type="text" inputmode="numeric" placeholder="TOTP" autocomplete="one-time-code" />
+        <button id="login-btn" type="button">Login</button>
       </div>
       <div class="auth-form">
-        <input id="invite-code" type="text" placeholder="邀请码" />
-        <button id="start-enroll" type="button">开始绑定 TOTP</button>
+        <input id="invite-code" type="text" placeholder="Invite" />
+        <button id="start-enroll" type="button">Bind</button>
       </div>
       <div id="enroll-output" class="mini-log"></div>`;
     el('login-btn').addEventListener('click', login);
@@ -335,7 +337,7 @@
       sessionUser = data.user;
       refreshAuth();
     } catch (e) {
-      el('enroll-output').textContent = `登录失败：${e.message}`;
+      el('enroll-output').textContent = `Login failed: ${e.message}`;
     }
   }
 
@@ -353,8 +355,8 @@
         <div>Secret：<code>${escapeHtml(data.secret)}</code></div>
         <pre class="code">${escapeHtml(data.otpauthUrl)}</pre>
         <div class="auth-form">
-          <input id="enroll-token" type="text" inputmode="numeric" placeholder="TOTP 6 位验证码" />
-          <button id="finish-enroll" type="button">完成注册</button>
+          <input id="enroll-token" type="text" inputmode="numeric" placeholder="TOTP" autocomplete="one-time-code" />
+          <button id="finish-enroll" type="button">Finish</button>
         </div>`;
       el('finish-enroll').addEventListener('click', async () => {
         try {
@@ -364,21 +366,21 @@
           });
           refreshAuth();
         } catch (e) {
-          out.innerHTML += `<div class="warn-box">注册失败：${escapeHtml(e.message)}</div>`;
+          out.innerHTML += `<div class="warn-box">Enroll failed: ${escapeHtml(e.message)}</div>`;
         }
       });
     } catch (e) {
-      out.textContent = `注册初始化失败：${e.message}`;
+      out.textContent = `Enroll failed: ${e.message}`;
     }
   }
 
   async function createInvite() {
     try {
       const data = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify({ maxUses: 1, expiresHours: 168 }) });
-      $adminOutput.innerHTML = `<div>邀请码：<code>${escapeHtml(data.code)}</code>，7 天有效。</div>`;
+      $adminOutput.innerHTML = `<div><code>${escapeHtml(data.code)}</code></div>`;
       await refreshLogs();
     } catch (e) {
-      $adminOutput.textContent = `生成失败：${e.message}`;
+      $adminOutput.textContent = `Failed: ${e.message}`;
     }
   }
 
@@ -387,22 +389,22 @@
       const data = await api('/api/admin/system', { method: 'GET', headers: {} });
       $adminOutput.innerHTML = `<pre class="code">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
     } catch (e) {
-      $adminOutput.textContent = `系统状态读取失败：${e.message}`;
+      $adminOutput.textContent = `Failed: ${e.message}`;
     }
   }
 
   async function syncPrices() {
     try {
-      $adminOutput.textContent = 'Syncing...';
+      $adminOutput.textContent = 'Syncing';
       const data = await api('/api/admin/prices', { method: 'POST', body: '{}' });
       const sync = data.sync || {};
       const pricing = data.pricing || {};
       $adminOutput.innerHTML = `
-        <div>已同步 ${escapeHtml(sync.syncedRows || 0)} 行。</div>
+        <div>${escapeHtml(sync.syncedRows || 0)}</div>
         <div>${escapeHtml((sync.sourceProviders || []).join(', '))}</div>
         <pre class="code">${escapeHtml(JSON.stringify(pricing.groups || [], null, 2))}</pre>`;
     } catch (e) {
-      $adminOutput.textContent = `价格同步失败：${e.message}`;
+      $adminOutput.textContent = `Failed: ${e.message}`;
     }
   }
 
@@ -411,25 +413,25 @@
       const data = await api(`/api/admin/logs?limit=20${activeGroup ? `&group=${encodeURIComponent(activeGroup)}` : ''}`, { method: 'GET', headers: {} });
       $adminOutput.innerHTML = renderLogTable(data.logs || []);
     } catch (e) {
-      $adminOutput.textContent = `日志读取失败：${e.message}`;
+      $adminOutput.textContent = `Failed: ${e.message}`;
     }
   }
 
   function renderLogTable(logs) {
     if (!logs.length) return '<div class="empty-state">—</div>';
-    return `<table class="log-table"><thead><tr><th>时间</th><th>题目</th><th>模型</th><th>状态</th><th>成本</th></tr></thead><tbody>${
+    return `<table class="log-table"><thead><tr><th>Time</th><th>Test</th><th>Model</th><th>Status</th><th>Cost</th></tr></thead><tbody>${
       logs.map((r) => `<tr><td>${escapeHtml(new Date(r.created_at).toLocaleString())}</td><td>${escapeHtml(r.question_id)}</td><td>${escapeHtml(r.routed_model_id || r.model_id)}</td><td>${r.ok ? 'OK' : 'FAIL'} ${escapeHtml(r.response_status || '')}</td><td>${formatCost(r.estimated_cost_usd)}</td></tr>`).join('')
     }</tbody></table>`;
   }
 
   async function runOne(q, card) {
     if (!sessionUser) {
-      flashStatus('Auth required', 'error');
+      flashStatus('Auth', 'error');
       return;
     }
     const cfg = readCfg(false);
     if (!cfg.apiKey) {
-      flashStatus('API Key required', 'error');
+      flashStatus('API Key', 'error');
       return;
     }
     saveGroupConfig();
@@ -439,7 +441,7 @@
     const controller = new AbortController();
     inflight.add(controller);
     try {
-      flashStatus(`运行中：${q.name}`, 'running');
+      flashStatus(`Running · ${q.name}`, 'running');
       const data = await fetch('/api/run-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -452,10 +454,10 @@
       });
       resultsById.set(q.id, data.result);
       renderResult(card, data.result);
-      flashStatus(data.result.ok ? `完成：${q.name}` : `失败：${q.name}`, data.result.ok ? 'done' : 'error');
+      flashStatus(data.result.ok ? `Done · ${q.name}` : `Failed · ${q.name}`, data.result.ok ? 'done' : 'error');
     } catch (e) {
       renderResult(card, { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group });
-      flashStatus(`失败：${e.message}`, 'error');
+      flashStatus(`Failed · ${e.message}`, 'error');
     } finally {
       inflight.delete(controller);
       setCardBusy(card, false);
@@ -465,9 +467,9 @@
 
   async function runCurrentGroup() {
     if (batchRunning) return;
-    if (!sessionUser) return flashStatus('Auth required', 'error');
+    if (!sessionUser) return flashStatus('Auth', 'error');
     const cfg = readCfg(false);
-    if (!cfg.apiKey) return flashStatus('API Key required', 'error');
+    if (!cfg.apiKey) return flashStatus('API Key', 'error');
     saveGroupConfig();
     stopFlag = false;
     batchRunning = true;
@@ -487,7 +489,7 @@
         if (!card) continue;
         setCardBusy(card, true);
         toggleCard(card, true);
-        flashStatus(`运行中 ${done}/${total} · ${q.name}`, 'running');
+        flashStatus(`${done}/${total} · ${q.name}`, 'running');
         const controller = new AbortController();
         inflight.add(controller);
         try {
@@ -510,7 +512,7 @@
           inflight.delete(controller);
           setCardBusy(card, false);
           done++;
-          flashStatus(`运行中 ${done}/${total}`, 'running');
+          flashStatus(`${done}/${total}`, 'running');
           if (!stopFlag && cfg.delay > 0) await sleep(cfg.delay);
         }
       }
@@ -518,7 +520,7 @@
     await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker));
     batchRunning = false;
     refreshControls();
-    flashStatus(stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, stopFlag ? 'error' : 'done');
+    flashStatus(stopFlag ? `Stopped ${done}/${total}` : `Done ${done}/${total}`, stopFlag ? 'error' : 'done');
     if ($adminBox && !$adminBox.hidden) refreshLogs();
   }
 
@@ -572,7 +574,7 @@
     const btn = card.querySelector('.qcard-run');
     btn.disabled = busy || batchRunning;
     btn.classList.toggle('running', busy);
-    btn.innerHTML = busy ? '<span class="busy-spinner"></span>运行中' : '▶ 运行';
+    btn.innerHTML = busy ? '<span class="busy-spinner"></span>Running' : '▶ Run';
   }
 
   function refreshControls() {
@@ -601,11 +603,11 @@
       const result = card.querySelector('.qcard-result');
       if (result) result.innerHTML = '';
     });
-    flashStatus('已清空', 'done');
+    flashStatus('Clear', 'done');
   }
 
   function exportLocalResults() {
-    if (!resultsById.size) return flashStatus('无本页结果可导出', 'error');
+    if (!resultsById.size) return flashStatus('Empty', 'error');
     const blob = new Blob([JSON.stringify([...resultsById.values()], null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -677,7 +679,7 @@
     if (cls === 'done' || cls === 'error') {
       setTimeout(() => {
         if (!$runStatus.classList.contains('running')) {
-          $runStatus.textContent = '就绪';
+          $runStatus.textContent = 'Ready';
           $runStatus.className = 'run-status';
         }
       }, 2200);

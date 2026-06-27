@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Model Quality Test</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233f6ad8'/%3E%3Ctext x='50%25' y='58%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='30' font-weight='700' fill='white'%3EMQ%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111111'/%3E%3Ctext x='50%25' y='58%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='30' font-weight='700' fill='white'%3EMQ%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="app-locked">
@@ -17,20 +17,20 @@
   <main class="container">
     <section class="panel" id="auth-panel">
       <header class="panel-header">
-        <h2>Auth</h2>
-        <span class="run-status" id="auth-status">检查登录状态...</span>
+        <h2>Account</h2>
+        <span class="run-status" id="auth-status">...</span>
       </header>
       <div class="panel-body auth-grid">
         <div class="auth-box" id="auth-current"></div>
         <div class="auth-box" id="auth-flow"></div>
         <div class="auth-box admin-only" id="admin-box" hidden>
-          <div class="section-title">管理员</div>
+          <div class="section-title">Admin</div>
           <div class="inline-actions">
-            <button id="create-invite" type="button">生成管理员邀请码</button>
-            <button id="system-status" type="button">系统状态</button>
-            <button id="sync-prices" type="button">同步价格表</button>
-            <button id="refresh-logs" type="button">刷新日志</button>
-            <button id="export-logs" type="button">导出日志 CSV</button>
+            <button id="create-invite" type="button">Invite</button>
+            <button id="system-status" type="button">System</button>
+            <button id="sync-prices" type="button">Prices</button>
+            <button id="refresh-logs" type="button">Logs</button>
+            <button id="export-logs" type="button">CSV</button>
           </div>
           <div class="mini-log" id="admin-output"></div>
         </div>
@@ -40,14 +40,14 @@
     <section class="panel protected-section" id="config-panel">
       <header class="panel-header">
         <h2>Config</h2>
-        <button class="link-btn" id="toggle-config" type="button">收起 ▾</button>
+        <button class="link-btn icon-btn" id="toggle-config" type="button" aria-label="Toggle">⌄</button>
       </header>
 
       <div class="panel-body" id="config-body">
         <div class="group-tabs" id="group-tabs"></div>
         <div class="grid-2">
           <label class="field">
-            <span>模型组</span>
+            <span>Group</span>
             <select id="cfg-group">
               <option value="OpenAI">OpenAI</option>
               <option value="Anthropic">Anthropic</option>
@@ -64,11 +64,11 @@
 
           <label class="field">
             <span>API Key</span>
-            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="该模型组的 key" />
+            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="API Key" />
           </label>
 
           <label class="field">
-            <span>模型</span>
+            <span>Model</span>
             <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" />
             <datalist id="model-suggestions">
               <option value="gpt-5.5"></option>
@@ -83,21 +83,21 @@
           </label>
 
           <label class="field">
-            <span>认证头格式</span>
+            <span>Auth</span>
             <select id="cfg-authMode">
               <option value="bearer">Authorization: Bearer</option>
               <option value="x-api-key">x-api-key</option>
-              <option value="both">两者都发</option>
+              <option value="both">both</option>
             </select>
           </label>
 
           <label class="field">
-            <span>max output tokens</span>
+            <span>Tokens</span>
             <input type="number" id="cfg-maxTokens" value="1024" min="16" max="64000" />
           </label>
 
           <label class="field">
-            <span>请求超时 (ms)</span>
+            <span>Timeout</span>
             <input type="number" id="cfg-timeout" value="120000" min="1000" max="900000" />
           </label>
 
@@ -121,48 +121,48 @@
           </label>
 
           <label class="field">
-            <span>题目之间延迟 (ms)</span>
+            <span>Delay</span>
             <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
           </label>
 
           <label class="field full">
-            <span>全局 system / instructions（可选）</span>
+            <span>System</span>
             <textarea id="cfg-system" rows="2"></textarea>
           </label>
 
           <label class="checkbox-row">
             <input type="checkbox" id="cfg-remember" />
-            <span>记住当前模型组配置（localStorage，含 API Key）</span>
+            <span>Remember</span>
           </label>
         </div>
       </div>
     </section>
 
     <section class="run-bar protected-section">
-      <button class="primary" id="run-all" type="button">▶ 运行当前组</button>
-      <button id="stop" type="button" disabled>■ 停止</button>
-      <button id="clear-results" type="button">清空结果</button>
-      <button id="export-results" type="button">导出本页 JSON</button>
+      <button class="primary" id="run-all" type="button">▶ Run</button>
+      <button id="stop" type="button" disabled>■ Stop</button>
+      <button id="clear-results" type="button">Clear</button>
+      <button id="export-results" type="button">JSON</button>
       <span class="run-bar-spacer"></span>
       <label class="run-bar-toggle">
-        <span>并发数</span>
+        <span>C</span>
         <input type="number" id="opt-concurrency" min="1" max="20" value="2" style="width:54px;padding:2px 6px" />
       </label>
       <label class="run-bar-toggle">
         <input type="checkbox" id="opt-collapse-after" />
-        <span>跑完自动折叠成功项</span>
+        <span>Fold</span>
       </label>
-      <span class="run-status" id="run-status">就绪</span>
+      <span class="run-status" id="run-status">Ready</span>
     </section>
 
     <section class="qsection protected-section" id="qsection">
       <header class="qsection-header">
         <h2>Tests <span id="q-count">0</span></h2>
         <div class="qsection-actions">
-          <button class="link-btn" id="expand-all" type="button">全部展开</button>
-          <button class="link-btn" id="collapse-all" type="button">全部收起</button>
+          <button class="link-btn" id="expand-all" type="button">Expand</button>
+          <button class="link-btn" id="collapse-all" type="button">Fold</button>
           <select id="filter-category">
-            <option value="">全部分类</option>
+            <option value="">All</option>
           </select>
         </div>
       </header>
