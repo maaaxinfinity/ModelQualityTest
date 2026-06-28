@@ -1,53 +1,72 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Model Quality Test</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111111'/%3E%3Ctext x='50%25' y='58%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='30' font-weight='700' fill='white'%3EMQ%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <meta name="color-scheme" content="dark light" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0e14'/%3E%3Crect x='3' y='3' width='58' height='58' rx='12' fill='none' stroke='%233b82f6' stroke-width='2'/%3E%3Ctext x='50%25' y='59%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='28' font-weight='700' fill='%23e6e9ef'%3EMQ%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body class="app-locked">
+  <!-- ───────────────────────── Top bar ───────────────────────── -->
   <header class="topbar">
     <div class="topbar-inner">
-      <h1>Model Quality Test</h1>
+      <div class="brand">
+        <span class="brand-mark">MQ</span>
+        <span class="brand-name">Model Quality Test</span>
+        <span class="brand-sub">multi-provider probe</span>
+      </div>
+      <div class="topbar-actions">
+        <div class="account-chip" id="account-chip" hidden></div>
+        <button class="icon-btn ghost" id="theme-toggle" type="button" aria-label="切换主题" title="切换明暗主题">◐</button>
+      </div>
     </div>
   </header>
 
-  <main class="container">
-    <section class="panel" id="auth-panel">
-      <header class="panel-header">
-        <h2>Account</h2>
-        <span class="run-status" id="auth-status">...</span>
-      </header>
-      <div class="panel-body auth-grid">
-        <div class="auth-box" id="auth-current"></div>
-        <div class="auth-box" id="auth-flow"></div>
-        <div class="auth-box admin-only" id="admin-box" hidden>
-          <div class="section-title">Admin</div>
-          <div class="inline-actions">
-            <button id="create-invite" type="button">Invite</button>
-            <button id="system-status" type="button">System</button>
-            <button id="sync-prices" type="button">Prices</button>
-            <button id="refresh-logs" type="button">Logs</button>
-            <button id="export-logs" type="button">CSV</button>
-          </div>
-          <div class="mini-log" id="admin-output"></div>
+  <!-- ───────────────────────── Auth screen (locked) ───────────────────────── -->
+  <main class="auth-screen" id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">MQ</div>
+      <h1 class="auth-title">Model Quality Test</h1>
+      <p class="auth-tagline">OpenAI · Anthropic · Google · Sakana · Image &nbsp;—&nbsp; 质量与渠道探测</p>
+      <div class="auth-flow" id="auth-flow"></div>
+      <div class="log-box" id="auth-output"></div>
+      <div class="auth-foot" id="auth-foot">连接中…</div>
+    </div>
+  </main>
+
+  <!-- ───────────────────────── Workspace (authed) ───────────────────────── -->
+  <main class="workspace" id="workspace">
+
+    <!-- Admin bar -->
+    <section class="admin-bar" id="admin-bar" hidden>
+      <div class="admin-bar-head">
+        <span class="dot-label"><span class="dot accent"></span>Admin</span>
+        <div class="admin-actions">
+          <button id="create-invite" type="button">邀请码</button>
+          <button id="system-status" type="button">系统状态</button>
+          <button id="sync-prices" type="button">同步价格</button>
+          <button id="refresh-logs" type="button">日志</button>
+          <button id="export-logs" type="button">导出 CSV</button>
         </div>
       </div>
+      <div class="log-box" id="admin-output"></div>
     </section>
 
-    <section class="panel protected-section" id="config-panel">
-      <header class="panel-header">
-        <h2>Config</h2>
-        <button class="link-btn icon-btn" id="toggle-config" type="button" aria-label="Toggle">⌄</button>
-      </header>
+    <!-- Group tabs -->
+    <nav class="group-tabs" id="group-tabs" aria-label="模型分组"></nav>
 
-      <div class="panel-body" id="config-body">
-        <div class="group-tabs" id="group-tabs"></div>
-        <div class="grid-2">
+    <!-- Config panel -->
+    <section class="card config-card" id="config-panel">
+      <header class="card-head" id="config-toggle">
+        <h2><span class="dot"></span>配置 <span class="muted" id="config-summary"></span></h2>
+        <span class="chevron" aria-hidden="true">⌄</span>
+      </header>
+      <div class="card-body" id="config-body">
+        <div class="field-grid">
           <label class="field">
-            <span>Group</span>
+            <span>分组 Group</span>
             <select id="cfg-group">
               <option value="OpenAI">OpenAI</option>
               <option value="Anthropic">Anthropic</option>
@@ -57,19 +76,19 @@
             </select>
           </label>
 
-          <label class="field">
+          <label class="field span-2">
             <span>Base URL</span>
-            <input type="text" id="cfg-baseUrl" value="https://api.openai.com" />
+            <input type="text" id="cfg-baseUrl" value="https://api.openai.com" spellcheck="false" />
           </label>
 
-          <label class="field">
+          <label class="field span-2">
             <span>API Key</span>
-            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="API Key" />
+            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="sk-…" spellcheck="false" />
           </label>
 
           <label class="field">
-            <span>Model</span>
-            <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" />
+            <span>模型 Model</span>
+            <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" spellcheck="false" />
             <datalist id="model-suggestions">
               <option value="gpt-5.5"></option>
               <option value="gpt-5.5-pro"></option>
@@ -83,7 +102,7 @@
           </label>
 
           <label class="field">
-            <span>Auth</span>
+            <span>鉴权 Auth</span>
             <select id="cfg-authMode">
               <option value="bearer">Authorization: Bearer</option>
               <option value="x-api-key">x-api-key</option>
@@ -92,13 +111,18 @@
           </label>
 
           <label class="field">
-            <span>Tokens</span>
+            <span>Max Tokens</span>
             <input type="number" id="cfg-maxTokens" value="1024" min="16" max="64000" />
           </label>
 
           <label class="field">
-            <span>Timeout</span>
+            <span>超时 Timeout (ms)</span>
             <input type="number" id="cfg-timeout" value="120000" min="1000" max="900000" />
+          </label>
+
+          <label class="field">
+            <span>间隔 Delay (ms)</span>
+            <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
           </label>
 
           <label class="field image-only">
@@ -117,52 +141,53 @@
 
           <label class="field image-only">
             <span>Image size</span>
-            <input type="text" id="cfg-image-size" value="1024x1024" />
+            <input type="text" id="cfg-image-size" value="1024x1024" spellcheck="false" />
           </label>
 
-          <label class="field">
-            <span>Delay</span>
-            <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
-          </label>
-
-          <label class="field full">
-            <span>System</span>
-            <textarea id="cfg-system" rows="2"></textarea>
+          <label class="field span-full">
+            <span>System Prompt</span>
+            <textarea id="cfg-system" rows="2" placeholder="留空则不发送 system"></textarea>
           </label>
 
           <label class="checkbox-row">
             <input type="checkbox" id="cfg-remember" />
-            <span>Remember</span>
+            <span>记住本分组配置（含 API Key，存于浏览器 localStorage）</span>
           </label>
         </div>
       </div>
     </section>
 
-    <section class="run-bar protected-section">
-      <button class="primary" id="run-all" type="button">▶ Run</button>
-      <button id="stop" type="button" disabled>■ Stop</button>
-      <button id="clear-results" type="button">Clear</button>
-      <button id="export-results" type="button">JSON</button>
-      <span class="run-bar-spacer"></span>
-      <label class="run-bar-toggle">
-        <span>C</span>
-        <input type="number" id="opt-concurrency" min="1" max="20" value="2" style="width:54px;padding:2px 6px" />
-      </label>
-      <label class="run-bar-toggle">
-        <input type="checkbox" id="opt-collapse-after" />
-        <span>Fold</span>
-      </label>
-      <span class="run-status" id="run-status">Ready</span>
+    <!-- Run bar -->
+    <section class="runbar" id="runbar">
+      <div class="runbar-main">
+        <button class="primary" id="run-all" type="button">▶ 运行全部</button>
+        <button id="stop" type="button" disabled>■ 停止</button>
+        <button id="clear-results" type="button">清空</button>
+        <button id="export-results" type="button">导出 JSON</button>
+      </div>
+      <div class="runbar-opts">
+        <label class="mini-field" title="并发数">
+          <span>并发</span>
+          <input type="number" id="opt-concurrency" min="1" max="20" value="2" />
+        </label>
+        <label class="switch" title="成功后自动折叠卡片">
+          <input type="checkbox" id="opt-collapse-after" />
+          <span>成功折叠</span>
+        </label>
+        <span class="run-status" id="run-status">就绪</span>
+      </div>
+      <div class="runbar-progress" id="run-progress" hidden><i id="run-progress-bar"></i></div>
     </section>
 
-    <section class="qsection protected-section" id="qsection">
-      <header class="qsection-header">
-        <h2>Tests <span id="q-count">0</span></h2>
-        <div class="qsection-actions">
-          <button class="link-btn" id="expand-all" type="button">Expand</button>
-          <button class="link-btn" id="collapse-all" type="button">Fold</button>
-          <select id="filter-category">
-            <option value="">All</option>
+    <!-- Tests -->
+    <section class="tests" id="tests">
+      <header class="tests-head">
+        <h2>测试用例 <span class="count" id="q-count">0</span></h2>
+        <div class="tests-actions">
+          <button class="ghost" id="expand-all" type="button">全部展开</button>
+          <button class="ghost" id="collapse-all" type="button">全部折叠</button>
+          <select id="filter-category" aria-label="分类筛选">
+            <option value="">全部分类</option>
           </select>
         </div>
       </header>
@@ -171,6 +196,6 @@
   </main>
 
   <script src="questions.js?v=6"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>
