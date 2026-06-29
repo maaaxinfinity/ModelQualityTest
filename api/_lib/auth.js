@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode-svg');
+const qrbtf = require('simple-qrbtf');
 const { parseCookies, sendJson, setSessionCookie } = require('./http');
 const { ensureSchema, query } = require('./db');
 
@@ -127,26 +128,38 @@ function otpauthUrl(displayName, secret) {
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
 }
 
-function otpauthQrSvg(displayName, secret) {
+// Fallback renderer: qrcode-svg emits a fixed width/height with no viewBox,
+// so we inject a viewBox + responsive width/height to keep it scannable when
+// CSS resizes it. Only used if the qrbtf renderer throws.
+function fallbackQrSvg(content) {
   const size = 224;
-  const qr = new QRCode({
-    content: otpauthUrl(displayName, secret),
-    padding: 3,
-    width: size,
-    height: size,
-    color: '#111111',
-    background: '#ffffff',
-    ecl: 'M'
-  });
-  // qrcode-svg emits a fixed width/height with no viewBox, so any CSS resize
-  // distorts the modules. Strip the XML prolog and inject a viewBox plus a
-  // responsive width/height so the QR scales correctly inside its container.
+  const qr = new QRCode({ content, padding: 3, width: size, height: size, color: '#111111', background: '#ffffff', ecl: 'M' });
   return qr.svg()
     .replace(/^<\?xml[^>]*>\s*/i, '')
     .replace(
       /<svg([^>]*?)\swidth="\d+"\s+height="\d+"/i,
       `<svg$1 viewBox="0 0 ${size} ${size}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"`
     );
+}
+
+function otpauthQrSvg(displayName, secret) {
+  const content = otpauthUrl(displayName, secret);
+  try {
+    // qrbtf returns a responsive SVG (viewBox + width/height="100%") already.
+    // BaseQr is the standard, high-compatibility style; dark modules on the
+    // white .qr-box card.
+    const svg = qrbtf.BaseQr({
+      text: content,
+      correctLevel: 'M',
+      posType: 'rect',
+      otherColor: '#111111',
+      posColor: '#111111'
+    });
+    if (typeof svg === 'string' && svg.includes('<svg')) return svg;
+    return fallbackQrSvg(content);
+  } catch (e) {
+    return fallbackQrSvg(content);
+  }
 }
 
 async function getUserFromRequest(req) {
