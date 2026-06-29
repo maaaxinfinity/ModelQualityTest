@@ -267,26 +267,77 @@
       // locked
       chip.hidden = true;
       adminBar.hidden = true;
+      Util.el('auth-output').innerHTML = '';
+      if (status.setupRequired) Auth.renderSetup();
+      else Auth.renderLogin();
+    },
+
+    // first-run: no users exist yet → only a name, then a QR. No invite.
+    renderSetup() {
       const foot = Util.el('auth-foot');
-      if (foot) foot.innerHTML = `<span class="dot ok"></span>已连接 · 使用 TOTP 登录或绑定邀请码`;
-      const flow = Util.el('auth-flow');
-      flow.innerHTML = `
-        <div class="auth-form">
-          <input id="auth-name" type="text" placeholder="用户名" autocomplete="username" />
-          <input id="auth-token" class="short" type="text" inputmode="numeric" placeholder="TOTP" autocomplete="one-time-code" />
+      if (foot) foot.innerHTML = `<span class="dot accent"></span>首次设置 · 创建初始管理员`;
+      Util.el('auth-flow').innerHTML = `
+        <div class="auth-head">
+          <span class="pill setup">首次设置</span>
+          <h2>创建初始管理员</h2>
+          <p>系统中尚无任何账户。设置用户名并绑定验证器，此账户将成为初始管理员。</p>
+        </div>
+        <div class="auth-stack">
+          <label class="auth-field"><span>用户名</span>
+            <input id="auth-name" type="text" placeholder="例如 admin" autocomplete="username" /></label>
+          <button id="start-setup" class="primary" type="button">生成验证器二维码</button>
+        </div>`;
+      const go = () => Auth.beginEnroll({ displayName: Util.el('auth-name').value });
+      Util.el('start-setup').addEventListener('click', go);
+      Util.el('auth-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    },
+
+    renderLogin() {
+      const foot = Util.el('auth-foot');
+      if (foot) foot.innerHTML = `<span class="dot ok"></span>已连接 · 请登录`;
+      Util.el('auth-flow').innerHTML = `
+        <div class="auth-head">
+          <h2>登录</h2>
+          <p>输入用户名与验证器中的 TOTP 验证码。</p>
+        </div>
+        <div class="auth-stack">
+          <label class="auth-field"><span>用户名</span>
+            <input id="auth-name" type="text" placeholder="用户名" autocomplete="username" /></label>
+          <label class="auth-field"><span>TOTP 验证码</span>
+            <input id="auth-token" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code" /></label>
           <button id="login-btn" class="primary" type="button">登录</button>
         </div>
-        <div class="auth-divider">首次使用 / 受邀加入</div>
-        <div class="auth-form subtle">
-          <input id="invite-code" type="text" placeholder="邀请码" />
-          <button id="start-enroll" type="button">绑定 2FA</button>
-        </div>`;
-      Util.el('auth-output').innerHTML = '';
+        <div class="auth-alt">收到邀请码？<button class="auth-link" id="goto-enroll" type="button">绑定新管理员</button></div>`;
       Util.el('login-btn').addEventListener('click', Auth.login);
-      Util.el('start-enroll').addEventListener('click', Auth.startEnroll);
+      Util.el('goto-enroll').addEventListener('click', Auth.renderInviteEnroll);
       const onEnter = (e) => { if (e.key === 'Enter') Auth.login(); };
       Util.el('auth-name').addEventListener('keydown', onEnter);
       Util.el('auth-token').addEventListener('keydown', onEnter);
+    },
+
+    // invited admin redeems an invite code created in the console
+    renderInviteEnroll() {
+      Util.el('auth-output').innerHTML = '';
+      const foot = Util.el('auth-foot');
+      if (foot) foot.innerHTML = `<span class="dot ok"></span>受邀加入 · 绑定验证器`;
+      Util.el('auth-flow').innerHTML = `
+        <div class="auth-head">
+          <h2>绑定新管理员</h2>
+          <p>使用管理员在控制台发放的邀请码绑定你的验证器。</p>
+        </div>
+        <div class="auth-stack">
+          <label class="auth-field"><span>用户名</span>
+            <input id="auth-name" type="text" placeholder="用户名" autocomplete="username" /></label>
+          <label class="auth-field"><span>邀请码</span>
+            <input id="invite-code" type="text" placeholder="邀请码" /></label>
+          <button id="start-enroll" class="primary" type="button">生成验证器二维码</button>
+        </div>
+        <div class="auth-alt"><button class="auth-link" id="goto-login" type="button">返回登录</button></div>`;
+      Util.el('start-enroll').addEventListener('click', () => Auth.beginEnroll({
+        displayName: Util.el('auth-name').value,
+        inviteCode: Util.el('invite-code').value
+      }));
+      Util.el('goto-login').addEventListener('click', Auth.renderLogin);
     },
 
     // session panel for 2FA rotation / warnings shown inside the workspace
@@ -330,17 +381,16 @@
       Auth.refresh();
     },
 
-    async startEnroll() {
+    // shared: start enrollment (bootstrap or invite) then show TOTP confirm
+    async beginEnroll(payload) {
       const out = Util.el('auth-output');
+      out.innerHTML = '';
       try {
-        const data = await Api.call('/api/auth/enroll', {
-          method: 'POST',
-          body: JSON.stringify({
-            displayName: Util.el('auth-name').value,
-            inviteCode: Util.el('invite-code').value
-          })
-        });
-        out.innerHTML = Auth.totpSetupHtml(data, 'enroll-token', 'finish-enroll', '完成绑定');
+        const data = await Api.call('/api/auth/enroll', { method: 'POST', body: JSON.stringify(payload) });
+        Util.el('auth-flow').innerHTML = Auth.totpMarkup(
+          data, 'enroll-token', 'finish-enroll', '完成绑定',
+          '用 Google Authenticator / 1Password 等扫描二维码，或手动录入密钥，然后输入 6 位验证码。'
+        ) + `<div class="auth-alt"><button class="auth-link" id="enroll-cancel" type="button">取消</button></div>`;
         Util.el('finish-enroll').addEventListener('click', async () => {
           try {
             await Api.call('/api/auth/enroll', {
@@ -349,11 +399,12 @@
             });
             Auth.refresh();
           } catch (e) {
-            out.innerHTML += `<div class="warn-box">绑定失败：${Util.escapeHtml(e.message)}</div>`;
+            out.innerHTML = `<div class="warn-box">绑定失败：${Util.escapeHtml(e.message)}</div>`;
           }
         });
+        Util.el('enroll-cancel').addEventListener('click', Auth.refresh);
       } catch (e) {
-        out.innerHTML = `<div class="warn-box">绑定失败：${Util.escapeHtml(e.message)}</div>`;
+        out.innerHTML = `<div class="warn-box">${Util.escapeHtml(e.message)}</div>`;
       }
     },
 
@@ -361,11 +412,9 @@
       try {
         const data = await Api.call('/api/auth/2fa', { method: 'POST', body: JSON.stringify({ action: 'start' }) });
         const panel = Auth.sessionPanel(
-          `<div class="dot-label" style="margin-bottom:12px"><span class="dot accent"></span>轮换两步验证</div>
-           <div id="twofa-output"></div>`
+          `<div class="dot-label" style="margin-bottom:14px"><span class="dot accent"></span>轮换两步验证</div>
+           <div id="twofa-output" style="max-width:360px">${Auth.totpMarkup(data, 'rotate-token', 'finish-rotate-2fa', '保存', '扫描新二维码并输入验证码以替换旧的验证器。')}</div>`
         );
-        panel.querySelector('#twofa-output').innerHTML =
-          Auth.totpSetupHtml(data, 'rotate-token', 'finish-rotate-2fa', '保存');
         Util.el('finish-rotate-2fa').addEventListener('click', async () => {
           const out = panel.querySelector('#twofa-output');
           try {
@@ -384,16 +433,17 @@
       }
     },
 
-    totpSetupHtml(data, inputId, buttonId, buttonText) {
+    totpMarkup(data, inputId, finishId, finishLabel, hint) {
       const qr = data.qrSvg ? `<div class="qr-box">${data.qrSvg}</div>` : '';
       return `
         <div class="totp-setup">
           ${qr}
-          <code>${Util.escapeHtml(data.secret || '')}</code>
-          <pre class="code" style="width:100%">${Util.escapeHtml(data.otpauthUrl || '')}</pre>
-          <div class="auth-form" style="box-shadow:none">
-            <input id="${inputId}" type="text" inputmode="numeric" placeholder="TOTP 验证码" autocomplete="one-time-code" />
-            <button id="${buttonId}" class="primary" type="button">${Util.escapeHtml(buttonText)}</button>
+          ${hint ? `<div class="totp-hint">${Util.escapeHtml(hint)}</div>` : ''}
+          <code class="totp-secret">${Util.escapeHtml(data.secret || '')}</code>
+          <div class="auth-stack">
+            <label class="auth-field"><span>TOTP 验证码</span>
+              <input id="${inputId}" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code" /></label>
+            <button id="${finishId}" class="primary" type="button">${Util.escapeHtml(finishLabel)}</button>
           </div>
         </div>`;
     }
