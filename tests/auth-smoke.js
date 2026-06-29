@@ -37,8 +37,8 @@ function totp(secret, offset = 0) {
     ((digest[truncationOffset + 1] & 0xff) << 16) |
     ((digest[truncationOffset + 2] & 0xff) << 8) |
     (digest[truncationOffset + 3] & 0xff)
-  ) % 1000000;
-  return String(code).padStart(6, '0');
+  ) % 100000000;
+  return String(code).padStart(8, '0');
 }
 
 function makeReq(method, body, cookie) {

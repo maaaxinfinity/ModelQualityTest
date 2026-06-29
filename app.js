@@ -317,7 +317,7 @@
           <label class="auth-field"><span>用户名</span>
             <input id="auth-name" type="text" placeholder="用户名" autocomplete="username" /></label>
           <label class="auth-field"><span>TOTP 验证码</span>
-            <input id="auth-token" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code" /></label>
+            <input id="auth-token" type="text" inputmode="numeric" placeholder="8 位验证码" autocomplete="one-time-code" /></label>
           <button id="login-btn" class="primary" type="button">登录</button>
         </div>
         <div class="auth-alt">收到邀请码？<button class="auth-link" id="goto-enroll" type="button">绑定新管理员</button></div>`;
@@ -404,7 +404,7 @@
         const data = await Api.call('/api/auth/enroll', { method: 'POST', body: JSON.stringify(payload) });
         Util.el('auth-flow').innerHTML = Auth.totpMarkup(
           data, 'enroll-token', 'finish-enroll', '完成绑定',
-          '用 Google Authenticator / 1Password 等扫描二维码，或手动录入密钥，然后输入 6 位验证码。'
+          '用 Google Authenticator / 1Password 等扫描二维码，或手动录入密钥，然后输入 8 位验证码。'
         ) + `<div class="auth-alt"><button class="auth-link" id="enroll-cancel" type="button">取消</button></div>`;
         Util.el('finish-enroll').addEventListener('click', async () => {
           try {
@@ -457,7 +457,7 @@
           <code class="totp-secret">${Util.escapeHtml(data.secret || '')}</code>
           <div class="auth-stack">
             <label class="auth-field"><span>TOTP 验证码</span>
-              <input id="${inputId}" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code" /></label>
+              <input id="${inputId}" type="text" inputmode="numeric" placeholder="8 位验证码" autocomplete="one-time-code" /></label>
             <button id="${finishId}" class="primary" type="button">${Util.escapeHtml(finishLabel)}</button>
           </div>
         </div>`;

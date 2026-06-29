@@ -1,12 +1,11 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode-svg');
-const qrbtf = require('simple-qrbtf');
 const { parseCookies, sendJson, setSessionCookie } = require('./http');
 const { ensureSchema, query } = require('./db');
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOTP_STEP_SECONDS = 30;
-const TOTP_DIGITS = 6;
+const TOTP_DIGITS = 8;
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -105,7 +104,7 @@ function totpAt(secret, counter) {
 
 function verifyTotpWithCounter(secret, token, windowSize) {
   const clean = String(token || '').replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(clean)) return null;
+  if (!new RegExp(`^\\d{${TOTP_DIGITS}}$`).test(clean)) return null;
   const counter = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
   const window = windowSize == null ? 1 : windowSize;
   for (let offset = -window; offset <= window; offset++) {
@@ -128,37 +127,29 @@ function otpauthUrl(displayName, secret) {
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
 }
 
-// Fallback renderer: qrcode-svg emits a fixed width/height with no viewBox,
-// so we inject a viewBox + responsive width/height to keep it scannable when
-// CSS resizes it. Only used if the qrbtf renderer throws.
-function fallbackQrSvg(content) {
+// Standard QR for the TOTP secret. Authenticator apps (Google Authenticator
+// in particular) need the standard finder patterns and contiguous modules to
+// detect the code — artistic styles (e.g. QRBTF DSJ) break scanning even when
+// the underlying matrix is valid. qrcode-svg emits a fixed width/height with
+// no viewBox, so inject a viewBox + responsive width/height so it scales
+// cleanly inside the .qr-box card without distortion.
+function otpauthQrSvg(displayName, secret) {
   const size = 224;
-  const qr = new QRCode({ content, padding: 3, width: size, height: size, color: '#111111', background: '#ffffff', ecl: 'M' });
+  const qr = new QRCode({
+    content: otpauthUrl(displayName, secret),
+    padding: 3,
+    width: size,
+    height: size,
+    color: '#0d0d0d',
+    background: '#ffffff',
+    ecl: 'M'
+  });
   return qr.svg()
     .replace(/^<\?xml[^>]*>\s*/i, '')
     .replace(
       /<svg([^>]*?)\swidth="\d+"\s+height="\d+"/i,
       `<svg$1 viewBox="0 0 ${size} ${size}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"`
     );
-}
-
-function otpauthQrSvg(displayName, secret) {
-  const content = otpauthUrl(displayName, secret);
-  const moduleColor = '#0d0d0d';
-  try {
-    // QRBTF "DSJ" lattice style (scattered modules + cross position frames).
-    // It ships QRBTF brand colors (blue/yellow/red); recolor to a single
-    // near-black so it fits the platform's monochrome palette. Matrix is
-    // identical to a standard encoder, so it stays reliably scannable.
-    let svg = qrbtf.DsjQR({ text: content, correctLevel: 'M' });
-    if (typeof svg === 'string' && svg.includes('<svg')) {
-      svg = svg.replace(/(fill|stroke)=(['"])#(?:0B2D97|F6B506|E02020)\2/gi, `$1=$2${moduleColor}$2`);
-      return svg;
-    }
-    return fallbackQrSvg(content);
-  } catch (e) {
-    return fallbackQrSvg(content);
-  }
 }
 
 async function getUserFromRequest(req) {
