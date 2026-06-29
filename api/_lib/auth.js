@@ -144,18 +144,17 @@ function fallbackQrSvg(content) {
 
 function otpauthQrSvg(displayName, secret) {
   const content = otpauthUrl(displayName, secret);
+  const moduleColor = '#0d0d0d';
   try {
-    // qrbtf returns a responsive SVG (viewBox + width/height="100%") already.
-    // BaseQr is the standard, high-compatibility style; dark modules on the
-    // white .qr-box card.
-    const svg = qrbtf.BaseQr({
-      text: content,
-      correctLevel: 'M',
-      posType: 'rect',
-      otherColor: '#111111',
-      posColor: '#111111'
-    });
-    if (typeof svg === 'string' && svg.includes('<svg')) return svg;
+    // QRBTF "DSJ" lattice style (scattered modules + cross position frames).
+    // It ships QRBTF brand colors (blue/yellow/red); recolor to a single
+    // near-black so it fits the platform's monochrome palette. Matrix is
+    // identical to a standard encoder, so it stays reliably scannable.
+    let svg = qrbtf.DsjQR({ text: content, correctLevel: 'M' });
+    if (typeof svg === 'string' && svg.includes('<svg')) {
+      svg = svg.replace(/(fill|stroke)=(['"])#(?:0B2D97|F6B506|E02020)\2/gi, `$1=$2${moduleColor}$2`);
+      return svg;
+    }
     return fallbackQrSvg(content);
   } catch (e) {
     return fallbackQrSvg(content);

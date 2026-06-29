@@ -1,28 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Model Quality Test</title>
-  <meta name="color-scheme" content="dark light" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0e14'/%3E%3Crect x='3' y='3' width='58' height='58' rx='12' fill='none' stroke='%233b82f6' stroke-width='2'/%3E%3Ctext x='50%25' y='59%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='28' font-weight='700' fill='%23e6e9ef'%3EMQ%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=5" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d0d0d'/%3E%3Ctext x='50%25' y='59%25' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='27' font-weight='600' fill='white'%3EMQ%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body class="app-locked">
-  <!-- ───────────────────────── Top bar ───────────────────────── -->
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">
-        <span class="brand-mark">MQ</span>
-        <span class="brand-name">Model Quality Test</span>
-        <span class="brand-sub">multi-provider probe</span>
-      </div>
-      <div class="topbar-actions">
-        <div class="account-chip" id="account-chip" hidden></div>
-        <button class="icon-btn ghost" id="theme-toggle" type="button" aria-label="切换主题" title="切换明暗主题">◐</button>
-      </div>
-    </div>
-  </header>
 
   <!-- ───────────────────────── Auth screen (locked) ───────────────────────── -->
   <main class="auth-screen" id="auth-screen">
@@ -40,166 +26,176 @@
     </div>
   </main>
 
-  <!-- ───────────────────────── Workspace (authed) ───────────────────────── -->
-  <main class="workspace" id="workspace">
+  <!-- ───────────────────────── App shell (authed) ───────────────────────── -->
+  <div class="shell" id="shell">
 
-    <!-- Admin bar -->
-    <section class="admin-bar" id="admin-bar" hidden>
-      <div class="admin-bar-head">
-        <span class="dot-label"><span class="dot accent"></span>Admin</span>
-        <div class="admin-actions">
-          <button id="create-invite" type="button">邀请码</button>
-          <button id="system-status" type="button">系统状态</button>
-          <button id="sync-prices" type="button">同步价格</button>
-          <button id="refresh-logs" type="button">日志</button>
-          <button id="export-logs" type="button">导出 CSV</button>
-        </div>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-mark">MQ</span>
+        <span class="brand-name">Model Quality</span>
       </div>
-      <div class="log-box" id="admin-output"></div>
-    </section>
 
-    <!-- Group tabs -->
-    <nav class="group-tabs" id="group-tabs" aria-label="模型分组"></nav>
+      <div class="nav-label">Providers</div>
+      <nav class="nav" id="group-nav" aria-label="模型分组"></nav>
 
-    <!-- Config panel -->
-    <section class="card config-card" id="config-panel">
-      <header class="card-head" id="config-toggle">
-        <h2><span class="dot"></span>配置 <span class="muted" id="config-summary"></span></h2>
-        <span class="chevron" aria-hidden="true">⌄</span>
-      </header>
-      <div class="card-body" id="config-body">
-        <div class="field-grid">
-          <label class="field">
-            <span>分组 Group</span>
-            <select id="cfg-group">
-              <option value="OpenAI">OpenAI</option>
-              <option value="Anthropic">Anthropic</option>
-              <option value="Google">Google</option>
-              <option value="Sakana">Sakana</option>
-              <option value="Image">Image</option>
-            </select>
-          </label>
-
-          <label class="field span-2">
-            <span>Base URL</span>
-            <input type="text" id="cfg-baseUrl" value="https://api.openai.com" spellcheck="false" />
-          </label>
-
-          <label class="field span-2">
-            <span>API Key</span>
-            <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="sk-…" spellcheck="false" />
-          </label>
-
-          <label class="field">
-            <span>模型 Model</span>
-            <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" spellcheck="false" />
-            <datalist id="model-suggestions">
-              <option value="gpt-5.5"></option>
-              <option value="gpt-5.5-pro"></option>
-              <option value="claude-opus-4.8"></option>
-              <option value="claude-sonnet-4-6"></option>
-              <option value="gemini-3.1-pro-preview"></option>
-              <option value="gemini-3-flash-preview"></option>
-              <option value="fugu-ultra"></option>
-              <option value="gpt-image-2"></option>
-            </datalist>
-          </label>
-
-          <label class="field">
-            <span>鉴权 Auth</span>
-            <select id="cfg-authMode">
-              <option value="bearer">Authorization: Bearer</option>
-              <option value="x-api-key">x-api-key</option>
-              <option value="both">both</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span>Max Tokens</span>
-            <input type="number" id="cfg-maxTokens" value="1024" min="16" max="64000" />
-          </label>
-
-          <label class="field">
-            <span>超时 Timeout (ms)</span>
-            <input type="number" id="cfg-timeout" value="120000" min="1000" max="900000" />
-          </label>
-
-          <label class="field">
-            <span>间隔 Delay (ms)</span>
-            <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
-          </label>
-
-          <label class="field image-only">
-            <span>Image n</span>
-            <input type="number" id="cfg-image-n" value="1" min="1" max="10" />
-          </label>
-
-          <label class="field image-only">
-            <span>Image quality</span>
-            <select id="cfg-image-quality">
-              <option value="low">low</option>
-              <option value="medium" selected>medium</option>
-              <option value="high">high</option>
-            </select>
-          </label>
-
-          <label class="field image-only">
-            <span>Image size</span>
-            <input type="text" id="cfg-image-size" value="1024x1024" spellcheck="false" />
-          </label>
-
-          <label class="field span-full">
-            <span>System Prompt</span>
-            <textarea id="cfg-system" rows="2" placeholder="留空则不发送 system"></textarea>
-          </label>
-
-          <label class="checkbox-row">
-            <input type="checkbox" id="cfg-remember" />
-            <span>记住本分组配置（含 API Key，存于浏览器 localStorage）</span>
-          </label>
-        </div>
+      <div class="sidebar-foot">
+        <button class="nav-item subtle" id="theme-toggle" type="button">
+          <span class="nav-ico" id="theme-ico">☾</span><span>主题</span>
+        </button>
+        <div class="account" id="account-chip" hidden></div>
       </div>
-    </section>
+    </aside>
 
-    <!-- Run bar -->
-    <section class="runbar" id="runbar">
-      <div class="runbar-main">
-        <button class="primary" id="run-all" type="button">▶ 运行全部</button>
-        <button id="stop" type="button" disabled>■ 停止</button>
-        <button id="clear-results" type="button">清空</button>
-        <button id="export-results" type="button">导出 JSON</button>
-      </div>
-      <div class="runbar-opts">
-        <label class="mini-field" title="并发数">
-          <span>并发</span>
-          <input type="number" id="opt-concurrency" min="1" max="20" value="2" />
-        </label>
-        <label class="switch" title="成功后自动折叠卡片">
-          <input type="checkbox" id="opt-collapse-after" />
-          <span>成功折叠</span>
-        </label>
-        <span class="run-status" id="run-status">就绪</span>
-      </div>
-      <div class="runbar-progress" id="run-progress" hidden><i id="run-progress-bar"></i></div>
-    </section>
-
-    <!-- Tests -->
-    <section class="tests" id="tests">
-      <header class="tests-head">
-        <h2>测试用例 <span class="count" id="q-count">0</span></h2>
-        <div class="tests-actions">
-          <button class="ghost" id="expand-all" type="button">全部展开</button>
-          <button class="ghost" id="collapse-all" type="button">全部折叠</button>
-          <select id="filter-category" aria-label="分类筛选">
-            <option value="">全部分类</option>
-          </select>
+    <!-- Main -->
+    <main class="main" id="workspace">
+      <header class="page-head">
+        <div class="page-head-text">
+          <h1 id="page-title">OpenAI</h1>
+          <p id="page-desc">配置并运行该分组下的模型质量探测用例。</p>
         </div>
       </header>
-      <div class="qgrid" id="qgrid"></div>
-    </section>
-  </main>
+
+      <!-- Admin -->
+      <section class="block admin-block" id="admin-bar" hidden>
+        <div class="block-head">
+          <h2>Admin</h2>
+          <div class="block-actions">
+            <button id="create-invite" type="button">邀请码</button>
+            <button id="system-status" type="button">系统状态</button>
+            <button id="sync-prices" type="button">同步价格</button>
+            <button id="refresh-logs" type="button">日志</button>
+            <button id="export-logs" type="button">导出 CSV</button>
+          </div>
+        </div>
+        <div class="log-box" id="admin-output"></div>
+      </section>
+
+      <!-- Config -->
+      <section class="block config-block" id="config-panel">
+        <div class="block-head" id="config-toggle">
+          <h2>Configuration <span class="muted" id="config-summary"></span></h2>
+          <span class="chevron" aria-hidden="true">⌄</span>
+        </div>
+        <div class="block-body" id="config-body">
+          <div class="field-grid">
+            <label class="field span-2">
+              <span>Base URL</span>
+              <input type="text" id="cfg-baseUrl" value="https://api.openai.com" spellcheck="false" />
+            </label>
+
+            <label class="field span-2">
+              <span>API Key</span>
+              <input type="password" id="cfg-apiKey" autocomplete="off" placeholder="sk-…" spellcheck="false" />
+            </label>
+
+            <label class="field span-2">
+              <span>Model</span>
+              <input type="text" id="cfg-model" value="gpt-5.5" list="model-suggestions" spellcheck="false" />
+              <datalist id="model-suggestions">
+                <option value="gpt-5.5"></option>
+                <option value="gpt-5.5-pro"></option>
+                <option value="claude-opus-4.8"></option>
+                <option value="claude-sonnet-4-6"></option>
+                <option value="gemini-3.1-pro-preview"></option>
+                <option value="gemini-3-flash-preview"></option>
+                <option value="fugu-ultra"></option>
+                <option value="gpt-image-2"></option>
+              </datalist>
+            </label>
+
+            <label class="field span-2">
+              <span>Authorization</span>
+              <select id="cfg-authMode">
+                <option value="bearer">Authorization: Bearer</option>
+                <option value="x-api-key">x-api-key</option>
+                <option value="both">both</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Max tokens</span>
+              <input type="number" id="cfg-maxTokens" value="1024" min="16" max="64000" />
+            </label>
+
+            <label class="field">
+              <span>Timeout (ms)</span>
+              <input type="number" id="cfg-timeout" value="120000" min="1000" max="900000" />
+            </label>
+
+            <label class="field">
+              <span>Delay (ms)</span>
+              <input type="number" id="cfg-delay" value="300" min="0" max="10000" />
+            </label>
+
+            <label class="field image-only">
+              <span>Image n</span>
+              <input type="number" id="cfg-image-n" value="1" min="1" max="10" />
+            </label>
+
+            <label class="field image-only">
+              <span>Image quality</span>
+              <select id="cfg-image-quality">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+
+            <label class="field image-only">
+              <span>Image size</span>
+              <input type="text" id="cfg-image-size" value="1024x1024" spellcheck="false" />
+            </label>
+
+            <label class="field span-full">
+              <span>System prompt</span>
+              <textarea id="cfg-system" rows="2" placeholder="留空则不发送 system"></textarea>
+            </label>
+
+            <label class="checkbox-row">
+              <input type="checkbox" id="cfg-remember" />
+              <span>记住本分组配置（含 API Key，存于浏览器 localStorage）</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Run bar -->
+      <section class="runbar" id="runbar">
+        <div class="runbar-main">
+          <button class="primary" id="run-all" type="button">运行全部</button>
+          <button id="stop" type="button" disabled>停止</button>
+          <button id="clear-results" type="button">清空</button>
+          <button id="export-results" type="button">导出 JSON</button>
+        </div>
+        <div class="runbar-opts">
+          <label class="mini-field" title="并发数"><span>并发</span>
+            <input type="number" id="opt-concurrency" min="1" max="20" value="2" /></label>
+          <label class="switch" title="成功后自动折叠卡片">
+            <input type="checkbox" id="opt-collapse-after" /><span>成功折叠</span></label>
+          <span class="run-status" id="run-status">就绪</span>
+        </div>
+        <div class="runbar-progress" id="run-progress" hidden><i id="run-progress-bar"></i></div>
+      </section>
+
+      <!-- Tests -->
+      <section class="block tests-block">
+        <div class="tests-head">
+          <h2>Tests <span class="count" id="q-count">0</span></h2>
+          <div class="tests-actions">
+            <button class="subtle" id="expand-all" type="button">全部展开</button>
+            <button class="subtle" id="collapse-all" type="button">全部折叠</button>
+            <select id="filter-category" aria-label="分类筛选">
+              <option value="">全部分类</option>
+            </select>
+          </div>
+        </div>
+        <div class="qgrid" id="qgrid"></div>
+      </section>
+    </main>
+  </div>
 
   <script src="questions.js?v=6"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

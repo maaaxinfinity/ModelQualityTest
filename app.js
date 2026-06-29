@@ -108,6 +108,13 @@
   /* ───────────────────────── Store ───────────────────────── */
   const Store = {
     GROUPS: ['OpenAI', 'Anthropic', 'Google', 'Sakana', 'Image'],
+    GROUP_DESC: {
+      OpenAI: '通过 Responses 端点探测 OpenAI 模型的质量与渠道行为。',
+      Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
+      Google: '面向 Gemini models/*:generateContent 的质量探测。',
+      Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
+      Image: '探测 gpt-image-2 的 n、quality、size 参数与小压测。'
+    },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
       Anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-opus-4.8', authMode: 'x-api-key' },
@@ -206,16 +213,16 @@
   const Theme = {
     KEY: 'mqt.theme',
     init() {
-      let t = 'dark';
-      try { t = localStorage.getItem(Theme.KEY) || 'dark'; } catch (e) {}
+      let t = 'light';
+      try { t = localStorage.getItem(Theme.KEY) || 'light'; } catch (e) {}
       Theme.apply(t);
       const btn = Util.el('theme-toggle');
       if (btn) btn.addEventListener('click', Theme.toggle);
     },
     apply(t) {
       document.documentElement.dataset.theme = t;
-      const btn = Util.el('theme-toggle');
-      if (btn) btn.textContent = t === 'dark' ? '◐' : '☀';
+      const ico = Util.el('theme-ico');
+      if (ico) ico.textContent = t === 'dark' ? '☀' : '☾';
     },
     toggle() {
       const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -249,11 +256,17 @@
 
       if (authed) {
         chip.hidden = false;
+        const initial = (status.user.displayName || '?').trim().charAt(0) || '?';
         chip.innerHTML = `
-          <span class="who">${Util.escapeHtml(status.user.displayName)}</span>
-          <span class="role ${status.user.role === 'admin' ? 'admin' : ''}">${Util.escapeHtml(status.user.role)}</span>
-          <button type="button" id="rotate-2fa" class="ghost" style="min-height:28px;padding:3px 10px;font-size:12px">2FA</button>
-          <button type="button" id="logout" class="ghost" style="min-height:28px;padding:3px 10px;font-size:12px">退出</button>`;
+          <span class="avatar">${Util.escapeHtml(initial)}</span>
+          <span class="acc-text">
+            <span class="acc-name">${Util.escapeHtml(status.user.displayName)}</span>
+            <span class="acc-role">${Util.escapeHtml(status.user.role)}</span>
+          </span>
+          <span class="acc-menu">
+            <button type="button" id="rotate-2fa" class="subtle" title="轮换两步验证">2FA</button>
+            <button type="button" id="logout" class="subtle" title="退出登录">退出</button>
+          </span>`;
         Util.el('rotate-2fa').addEventListener('click', Auth.startRotation);
         Util.el('logout').addEventListener('click', Auth.logout);
 
@@ -346,10 +359,12 @@
       if (!panel) {
         panel = document.createElement('section');
         panel.id = 'session-panel';
-        panel.className = 'card';
-        panel.style.padding = '14px 16px';
+        panel.className = 'block';
+        panel.style.padding = '16px 18px';
         const ws = Util.el('workspace');
-        ws.insertBefore(panel, ws.firstChild);
+        const head = ws.querySelector('.page-head');
+        if (head && head.nextSibling) ws.insertBefore(panel, head.nextSibling);
+        else ws.appendChild(panel);
       }
       panel.hidden = false;
       panel.innerHTML = html;
@@ -820,15 +835,15 @@
   }
 
   /* ───────────────────────── Group switching ───────────────────────── */
-  function buildGroupTabs() {
-    const host = Util.el('group-tabs');
+  function buildGroupNav() {
+    const host = Util.el('group-nav');
     host.innerHTML = '';
     for (const group of Store.GROUPS) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'group-tab';
+      btn.className = 'nav-item';
       btn.dataset.group = group;
-      btn.innerHTML = `${Util.escapeHtml(group)} <span class="gt-count">${Store.questionsForGroup(group).length}</span>`;
+      btn.innerHTML = `<span class="nav-ico">●</span><span>${Util.escapeHtml(group)}</span><span class="nav-count">${Store.questionsForGroup(group).length}</span>`;
       btn.addEventListener('click', () => applyGroup(group));
       host.appendChild(btn);
     }
@@ -836,12 +851,15 @@
 
   function applyGroup(group, silent) {
     Store.activeGroup = group;
-    $cfg.group.value = group;
     loadGroupConfig();
     document.body.dataset.group = group;
-    document.querySelectorAll('.group-tab').forEach((btn) => {
+    document.querySelectorAll('#group-nav .nav-item').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.group === group);
     });
+    const title = Util.el('page-title');
+    const desc = Util.el('page-desc');
+    if (title) title.textContent = group;
+    if (desc) desc.textContent = Store.GROUP_DESC[group] || '';
     Cards.renderList();
     if (!silent) UI.flash(group, 'done');
   }
@@ -856,7 +874,6 @@
     }
 
     $cfg = {
-      group: Util.el('cfg-group'),
       baseUrl: Util.el('cfg-baseUrl'),
       apiKey: Util.el('cfg-apiKey'),
       model: Util.el('cfg-model'),
@@ -871,7 +888,7 @@
       imageSize: Util.el('cfg-image-size')
     };
 
-    buildGroupTabs();
+    buildGroupNav();
     bindEvents();
     applyGroup('OpenAI', true);
     loadGroupConfig();
@@ -880,7 +897,6 @@
   }
 
   function bindEvents() {
-    $cfg.group.addEventListener('change', () => applyGroup($cfg.group.value));
     Util.el('config-toggle').addEventListener('click', () => Util.el('config-panel').classList.toggle('collapsed'));
 
     Util.el('run-all').addEventListener('click', Runner.runGroup);
@@ -899,7 +915,7 @@
     Util.el('export-logs').addEventListener('click', Admin.exportCsv);
 
     for (const node of Object.values($cfg)) {
-      if (!node || node === $cfg.group) continue;
+      if (!node) continue;
       node.addEventListener('change', saveGroupConfig);
     }
     $cfg.baseUrl.addEventListener('input', updateConfigSummary);
