@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "pg": "^8.13.1",
-    "qrcode-svg": "^1.1.0"
+    "qrcode-svg": "^1.1.0",
+    "simple-qrbtf": "^1.5.0"
   },
   "devDependencies": {
     "vercel": "^54.18.0"
