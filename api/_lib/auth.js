@@ -128,16 +128,25 @@ function otpauthUrl(displayName, secret) {
 }
 
 function otpauthQrSvg(displayName, secret) {
+  const size = 224;
   const qr = new QRCode({
     content: otpauthUrl(displayName, secret),
     padding: 3,
-    width: 224,
-    height: 224,
+    width: size,
+    height: size,
     color: '#111111',
     background: '#ffffff',
     ecl: 'M'
   });
-  return qr.svg().replace(/^<\?xml[^>]*>\s*/i, '');
+  // qrcode-svg emits a fixed width/height with no viewBox, so any CSS resize
+  // distorts the modules. Strip the XML prolog and inject a viewBox plus a
+  // responsive width/height so the QR scales correctly inside its container.
+  return qr.svg()
+    .replace(/^<\?xml[^>]*>\s*/i, '')
+    .replace(
+      /<svg([^>]*?)\swidth="\d+"\s+height="\d+"/i,
+      `<svg$1 viewBox="0 0 ${size} ${size}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"`
+    );
 }
 
 async function getUserFromRequest(req) {
