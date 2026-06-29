@@ -1,6 +1,4 @@
 const crypto = require('crypto');
-const QRCode = require('qrcode-svg');
-const qrbtf = require('simple-qrbtf');
 const { parseCookies, sendJson, setSessionCookie } = require('./http');
 const { ensureSchema, query } = require('./db');
 
@@ -128,40 +126,6 @@ function otpauthUrl(displayName, secret) {
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
 }
 
-// Standard fallback QR: qrcode-svg with an injected viewBox so it scales
-// cleanly. Used if the styled qrbtf renderer ever throws.
-function standardQrSvg(content) {
-  const size = 224;
-  const qr = new QRCode({ content, padding: 3, width: size, height: size, color: '#0d0d0d', background: '#ffffff', ecl: 'M' });
-  return qr.svg()
-    .replace(/^<\?xml[^>]*>\s*/i, '')
-    .replace(
-      /<svg([^>]*?)\swidth="\d+"\s+height="\d+"/i,
-      `<svg$1 viewBox="0 0 ${size} ${size}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"`
-    );
-}
-
-// QRBTF "A1" dotted style with point interference (round modules + scattered
-// dots). Artistic QRs survive scanning by leaning on a high error-correction
-// level, and Google Authenticator needs high-contrast finder patterns — qrbtf
-// renders those in light gray, so recolor every module + finder to near-black.
-// ECL 'Q' (25% recovery) is used because at 'Q' the qrbtf matrix is provably
-// identical to a standard encoder, so the encoding is correct.
-function otpauthQrSvg(displayName, secret) {
-  const content = otpauthUrl(displayName, secret);
-  try {
-    let svg = qrbtf.CircleQr({ text: content, correctLevel: 'Q' });
-    if (typeof svg === 'string' && svg.includes('<svg')) {
-      // gray finders (#999) + module fills/strokes (#000) → high-contrast near-black
-      svg = svg.replace(/(['"])#(?:999|000(?:000)?)\1/gi, '$1#0d0d0d$1');
-      return svg;
-    }
-    return standardQrSvg(content);
-  } catch (e) {
-    return standardQrSvg(content);
-  }
-}
-
 async function getUserFromRequest(req) {
   await ensureSchema();
   const cookies = parseCookies(req);
@@ -200,7 +164,6 @@ module.exports = {
   getUserFromRequest,
   issueSession,
   otpauthUrl,
-  otpauthQrSvg,
   randomCode,
   randomId,
   requireAdmin,

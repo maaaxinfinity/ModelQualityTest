@@ -2,7 +2,6 @@ const { ensureSchema, query } = require('../_lib/db');
 const {
   generateTotpSecret,
   issueSession,
-  otpauthQrSvg,
   otpauthUrl,
   randomId,
   verifyTotpWithCounter
@@ -58,7 +57,6 @@ async function startEnrollment(payload) {
       displayName,
       secret,
       otpauthUrl: otpauthUrl(displayName, secret),
-      qrSvg: otpauthQrSvg(displayName, secret),
       mode,
       expiresInSeconds: 600
     }

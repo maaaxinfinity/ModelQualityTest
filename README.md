@@ -13,7 +13,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
-- TOTP setup returns server-rendered QR SVG, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
+- TOTP setup returns an otpauth URL rendered client-side as a QR with the qrbtf bundle, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
 
 ## Local Development
 

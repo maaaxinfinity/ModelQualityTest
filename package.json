@@ -10,9 +10,7 @@
     "test:db": "node tests/db-smoke.js && node tests/auth-smoke.js && node tests/run-test-smoke.js"
   },
   "dependencies": {
-    "pg": "^8.13.1",
-    "qrcode-svg": "^1.1.0",
-    "simple-qrbtf": "^1.5.0"
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "vercel": "^54.18.0"

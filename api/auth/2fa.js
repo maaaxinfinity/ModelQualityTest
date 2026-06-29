@@ -1,7 +1,6 @@
 const { ensureSchema, query, transaction } = require('../_lib/db');
 const {
   generateTotpSecret,
-  otpauthQrSvg,
   otpauthUrl,
   randomId,
   requireUser,
@@ -23,7 +22,6 @@ async function startRotation(req, res, user) {
     enrollmentId: id,
     secret,
     otpauthUrl: otpauthUrl(user.display_name, secret),
-    qrSvg: otpauthQrSvg(user.display_name, secret),
     expiresInSeconds: 600
   });
 }

@@ -406,6 +406,7 @@
           data, 'enroll-token', 'finish-enroll', '完成绑定',
           '用 Google Authenticator / 1Password 等扫描二维码，或手动录入密钥，然后输入 8 位验证码。'
         ) + `<div class="auth-alt"><button class="auth-link" id="enroll-cancel" type="button">取消</button></div>`;
+        Auth.paintQr(Util.el('auth-flow'));
         Util.el('finish-enroll').addEventListener('click', async () => {
           try {
             await Api.call('/api/auth/enroll', {
@@ -430,6 +431,7 @@
           `<div class="dot-label" style="margin-bottom:14px"><span class="dot accent"></span>轮换两步验证</div>
            <div id="twofa-output" style="max-width:360px">${Auth.totpMarkup(data, 'rotate-token', 'finish-rotate-2fa', '保存', '扫描新二维码并输入验证码以替换旧的验证器。')}</div>`
         );
+        Auth.paintQr(panel);
         Util.el('finish-rotate-2fa').addEventListener('click', async () => {
           const out = panel.querySelector('#twofa-output');
           try {
@@ -449,7 +451,9 @@
     },
 
     totpMarkup(data, inputId, finishId, finishLabel, hint) {
-      const qr = data.qrSvg ? `<div class="qr-box">${data.qrSvg}</div>` : '';
+      // QR is rendered client-side by the qrbtf bundle (QRLine style), exactly
+      // like ge2api. No server-side fallback.
+      const qr = `<div class="qr-box" data-qr data-otpauth="${Util.escapeAttr(data.otpauthUrl || '')}"></div>`;
       return `
         <div class="totp-setup">
           ${qr}
@@ -461,6 +465,14 @@
             <button id="${finishId}" class="primary" type="button">${Util.escapeHtml(finishLabel)}</button>
           </div>
         </div>`;
+    },
+
+    // Render the QR with the qrbtf bundle (window.ge2AdminQr → QRLine).
+    paintQr(root) {
+      const box = (root || document).querySelector('.qr-box[data-qr]');
+      if (!box) return;
+      const otpauth = box.getAttribute('data-otpauth');
+      window.ge2AdminQr.render(box, otpauth, { posType: 'roundRect', lineColor: '#0d0d0d', posColor: '#0d0d0d' });
     }
   };
 

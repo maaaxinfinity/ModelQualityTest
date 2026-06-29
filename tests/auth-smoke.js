@@ -83,7 +83,7 @@ async function enrollUser(displayName, inviteCode) {
   const started = start.json();
   assert(started.secret);
   assert(started.otpauthUrl.startsWith('otpauth://totp/'));
-  assert.match(started.qrSvg, /<svg[\s>]/);
+  assert.match(started.otpauthUrl, /digits=8/);
 
   const enrollmentToken = totp(started.secret);
   const finish = await call(enroll, 'POST', {
@@ -134,7 +134,7 @@ async function main() {
   assert.equal(rotateStart.statusCode, 200, rotateStart.body);
   const rotateSetup = rotateStart.json();
   assert(rotateSetup.secret);
-  assert.match(rotateSetup.qrSvg, /<svg[\s>]/);
+  assert(rotateSetup.otpauthUrl.startsWith('otpauth://totp/'));
   const rotateConfirm = await call(twofa, 'POST', {
     action: 'confirm',
     enrollmentId: rotateSetup.enrollmentId,
