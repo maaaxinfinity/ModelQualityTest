@@ -23,6 +23,15 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     },
     escapeAttr(s) { return Util.escapeHtml(s).replace(/"/g, '&quot;'); },
+    // Best human message from an Api.call error: prefer the server's detail,
+    // then its error code, then the JS message, then the HTTP status.
+    errText(e) {
+      const b = e && e.body;
+      const msg = (b && (b.detail || b.error)) || (e && e.message) || '';
+      if (msg) return msg;
+      if (e && e.status) return `请求失败 (HTTP ${e.status})`;
+      return '未知错误';
+    },
     cssEscape(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c); },
     sleep(ms) { return new Promise((r) => setTimeout(r, ms)); },
     makeBatchId() {
@@ -292,7 +301,7 @@
         Picker.render();
         out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」（启用 ${data.config.enabledModels.length} / 共 ${data.config.models.length} 个模型）。</div>`;
       } catch (e) {
-        out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(e.message)}</div>`;
+        out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(Util.errText(e))}</div>`;
       }
     },
 
@@ -341,7 +350,7 @@
         Picker.render();
         out.innerHTML = `<div class="ok-box">已同步，${r.count} 个模型。</div>`;
       } catch (e) {
-        out.innerHTML = `<div class="warn-box">同步失败：${Util.escapeHtml(e.message)}</div>`;
+        out.innerHTML = `<div class="warn-box">同步失败：${Util.escapeHtml(Util.errText(e))}</div>`;
       }
     },
 
@@ -433,7 +442,7 @@
         Config.fill(group, next ? next.id : null);
         out.innerHTML = '<div class="ok-box">端点已删除。</div>';
       } catch (e) {
-        out.innerHTML = `<div class="warn-box">删除失败：${Util.escapeHtml(e.message)}</div>`;
+        out.innerHTML = `<div class="warn-box">删除失败：${Util.escapeHtml(Util.errText(e))}</div>`;
       }
     },
 

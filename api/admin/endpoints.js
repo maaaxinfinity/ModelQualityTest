@@ -75,7 +75,7 @@ async function syncEndpointModels(row) {
   }
 }
 
-module.exports = async function handler(req, res) {
+async function handleRequest(req, res) {
   await ensureSchema();
   const user = await requireAdmin(req, res);
   if (!user) return;
@@ -226,6 +226,17 @@ module.exports = async function handler(req, res) {
   }
 
   return sendMethodNotAllowed(res, ['GET', 'POST', 'DELETE']);
+}
+
+// Surface unexpected errors as JSON so the client shows a real reason instead
+// of a blank 500 body ("保存失败：" with nothing after it).
+module.exports = async function handler(req, res) {
+  try {
+    await handleRequest(req, res);
+  } catch (e) {
+    if (res.headersSent || res.writableEnded) throw e;
+    sendJson(res, 500, { error: 'server_error', detail: e.message || String(e) });
+  }
 };
 
 module.exports.syncEndpointModels = syncEndpointModels;
