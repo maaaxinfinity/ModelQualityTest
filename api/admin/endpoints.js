@@ -29,6 +29,7 @@ function rowToConfig(row) {
     apiKey: decryptSecret(row.api_key_cipher),
     hasApiKey: !!row.api_key_cipher,
     models: Array.isArray(row.models_json) ? row.models_json : [],
+    enabledModels: Array.isArray(row.enabled_models_json) ? row.enabled_models_json : [],
     modelsSyncedAt: row.models_synced_at,
     updatedAt: row.updated_at
   };
@@ -60,11 +61,15 @@ async function syncEndpointModels(row) {
   try {
     const res = await fetchModels(row.model_group, cfg);
     if (!res.ok) return { id: row.id, name: row.name, ok: false, status: res.status, message: res.message };
+    // Prune the enabled subset to models that still exist upstream.
+    const available = new Set(res.models);
+    const prevEnabled = Array.isArray(row.enabled_models_json) ? row.enabled_models_json : [];
+    const enabled = prevEnabled.filter((m) => available.has(m));
     const updated = await query(
-      'update endpoint_configs set models_json=$1, models_synced_at=now() where id=$2 returning models_synced_at',
-      [JSON.stringify(res.models), row.id]
+      'update endpoint_configs set models_json=$1, enabled_models_json=$2, models_synced_at=now() where id=$3 returning models_synced_at',
+      [JSON.stringify(res.models), JSON.stringify(enabled), row.id]
     );
-    return { id: row.id, name: row.name, ok: true, count: res.models.length, syncedAt: updated.rows[0].models_synced_at };
+    return { id: row.id, name: row.name, ok: true, count: res.models.length, enabled: enabled.length, syncedAt: updated.rows[0].models_synced_at };
   } catch (e) {
     return { id: row.id, name: row.name, ok: false, message: e.message };
   }
@@ -140,6 +145,9 @@ module.exports = async function handler(req, res) {
     if (!GROUPS.includes(group)) return sendJson(res, 400, { error: 'bad_group' });
     const name = String(payload.name || '').trim();
     if (!name) return sendJson(res, 400, { error: 'missing_name' });
+    // Save is gated on at least one enabled model (detected + ticked in the panel).
+    const enabledModels = Array.isArray(payload.enabledModels) ? payload.enabledModels.filter((m) => typeof m === 'string' && m.trim()) : [];
+    if (!enabledModels.length) return sendJson(res, 400, { error: 'no_enabled_models', detail: '请先检测并至少启用一个模型' });
     const id = String(payload.id || '').trim() || randomId('ep');
 
     // Empty/omitted apiKey preserves the existing cipher so a non-key edit does
@@ -148,15 +156,16 @@ module.exports = async function handler(req, res) {
     const cipher = hasNewKey ? encryptSecret(payload.apiKey.trim()) : null;
     // Model list: caller may pass a detected list; null leaves the stored one.
     const models = Array.isArray(payload.models) ? JSON.stringify(payload.models) : null;
+    const enabled = JSON.stringify(enabledModels);
 
     try {
       const result = await query(
         `insert into endpoint_configs (
            id, model_group, name, base_url, model, auth_mode, max_tokens, timeout, delay,
            system_prompt, image_n, image_quality, image_size, api_key_cipher,
-           models_json, models_synced_at, updated_by, updated_at
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-           case when $15 is null then null else now() end, $16, now())
+           models_json, enabled_models_json, models_synced_at, updated_by, updated_at
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+           case when $15 is null then null else now() end, $17, now())
          on conflict (id) do update set
            model_group = excluded.model_group,
            name = excluded.name,
@@ -172,6 +181,7 @@ module.exports = async function handler(req, res) {
            image_size = excluded.image_size,
            api_key_cipher = coalesce(excluded.api_key_cipher, endpoint_configs.api_key_cipher),
            models_json = coalesce(excluded.models_json, endpoint_configs.models_json),
+           enabled_models_json = excluded.enabled_models_json,
            models_synced_at = case when excluded.models_json is null then endpoint_configs.models_synced_at else now() end,
            updated_by = excluded.updated_by,
            updated_at = now()
@@ -181,7 +191,7 @@ module.exports = async function handler(req, res) {
           group,
           name,
           String(payload.baseUrl || '').trim() || null,
-          String(payload.model || '').trim() || null,
+          null,
           String(payload.authMode || 'bearer').trim() || 'bearer',
           toInt(payload.maxTokens, 1024),
           toInt(payload.timeout, 120000),
@@ -192,6 +202,7 @@ module.exports = async function handler(req, res) {
           String(payload.imageSize || '1024x1024').trim() || '1024x1024',
           cipher,
           models,
+          enabled,
           user.id
         ]
       );

@@ -139,6 +139,7 @@ async function ensureSchema() {
         image_size text,
         api_key_cipher text,
         models_json jsonb,
+        enabled_models_json jsonb,
         models_synced_at timestamptz,
         updated_by text references app_users(id),
         updated_at timestamptz not null default now(),
@@ -147,6 +148,7 @@ async function ensureSchema() {
       create index if not exists endpoint_configs_group_idx on endpoint_configs(model_group);
     `);
     await query('alter table endpoint_configs add column if not exists models_json jsonb');
+    await query('alter table endpoint_configs add column if not exists enabled_models_json jsonb');
     await query('alter table endpoint_configs add column if not exists models_synced_at timestamptz');
     // Migrate the original one-row-per-group shape (model_group PRIMARY KEY) to
     // many-per-group (id PRIMARY KEY, named endpoints). No-op on a fresh DB.

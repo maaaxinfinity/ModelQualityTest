@@ -104,14 +104,28 @@ async function main() {
   assert.equal(official.rows[0].model, 'gpt-5.5-pro');
   assert.equal(decryptSecret(official.rows[0].api_key_cipher), 'sk-official');
 
-  // Model list round-trips as jsonb with a sync timestamp.
+  // Model list + enabled subset round-trip as jsonb with a sync timestamp.
   await query(
-    "update endpoint_configs set models_json=$1, models_synced_at=now() where id='ep_official'",
-    [JSON.stringify(['gpt-5.5', 'gpt-5.5-pro'])]
+    "update endpoint_configs set models_json=$1, enabled_models_json=$2, models_synced_at=now() where id='ep_official'",
+    [JSON.stringify(['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.5-mini']), JSON.stringify(['gpt-5.5', 'gpt-5.5-mini'])]
   );
   official = await query("select * from endpoint_configs where id='ep_official'");
-  assert.deepEqual(official.rows[0].models_json, ['gpt-5.5', 'gpt-5.5-pro']);
+  assert.deepEqual(official.rows[0].models_json, ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.5-mini']);
+  assert.deepEqual(official.rows[0].enabled_models_json, ['gpt-5.5', 'gpt-5.5-mini']);
   assert.ok(official.rows[0].models_synced_at);
+
+  // A sync that drops a model upstream prunes it from the enabled subset
+  // (intersect enabled ∩ new list) — mirrors syncEndpointModels.
+  const row = official.rows[0];
+  const newList = ['gpt-5.5', 'gpt-5.5-pro'];               // gpt-5.5-mini gone upstream
+  const available = new Set(newList);
+  const pruned = (row.enabled_models_json || []).filter((m) => available.has(m));
+  await query(
+    "update endpoint_configs set models_json=$1, enabled_models_json=$2 where id='ep_official'",
+    [JSON.stringify(newList), JSON.stringify(pruned)]
+  );
+  official = await query("select * from endpoint_configs where id='ep_official'");
+  assert.deepEqual(official.rows[0].enabled_models_json, ['gpt-5.5']);
 
   // Delete one endpoint; the other and its key survive.
   await query("delete from endpoint_configs where id='ep_proxy'");

@@ -126,11 +126,13 @@
     activeView: 'test',     // test | endpoints | history | admin
     editingGroup: 'OpenAI', // group currently shown in the Endpoints editor
     editingId: null,        // endpoint id loaded in the editor; null = new endpoint
-    detectedModels: null,   // model list from the last successful detect (for save)
+    detectedModels: null,   // full model list from the last successful detect
+    enabledModels: [],      // subset ticked in the detect panel (saved on the endpoint)
+    lastSyncedAt: null,     // models_synced_at shown in the detect panel header
     detectOk: false,        // has the current form passed model detection?
-    pendingModel: '',       // saved model to preselect once options are populated
     configs: {},            // group -> array of endpoints loaded from the database
     selected: {},           // group -> array of selected endpoint ids (for the next run)
+    selectedModels: {},     // group -> { endpointId -> [modelId] } chosen for the next run
     sessionUser: null,
     resultsById: new Map(),
     inflight: new Set(),
@@ -157,6 +159,20 @@
       if (chosen.length) return chosen;
       return list.length ? [list[0].id] : [];
     },
+    // Models chosen to run for one endpoint. Defaults to all of its enabled
+    // models; always intersected with the endpoint's current enabled set so a
+    // removed model never lingers in the selection.
+    selectedModelIds(group, id) {
+      const ep = Store.endpoint(group, id);
+      const enabled = (ep && ep.enabledModels) || [];
+      const map = Store.selectedModels[group] || {};
+      const chosen = (map[id] || []).filter((m) => enabled.includes(m));
+      return chosen.length ? chosen : enabled.slice();
+    },
+    setSelectedModelIds(group, id, models) {
+      if (!Store.selectedModels[group]) Store.selectedModels[group] = {};
+      Store.selectedModels[group][id] = models;
+    },
     questionsForGroup(group) {
       return window.QUESTIONS.filter((q) => q.group === group);
     }
@@ -165,13 +181,13 @@
   // cached config field refs (filled in boot)
   let $cfg = {};
 
-  // Turn a stored config object into the shape /api/run-test expects.
-  function cfgToRunPayload(c) {
+  // Turn a stored config object + a chosen model into the run-test payload.
+  function cfgToRunPayload(c, modelId) {
     return {
       group: c.group,
       baseUrl: (c.baseUrl || '').trim(),
       apiKey: (c.apiKey || '').trim(),
-      model: (c.model || '').trim() || Store.DEFAULTS[c.group].model,
+      model: (modelId || '').trim() || Store.DEFAULTS[c.group].model,
       authMode: c.authMode || 'bearer',
       maxTokens: Number(c.maxTokens || 1024),
       timeout: Number(c.timeout || 120000),
@@ -213,7 +229,6 @@
       $cfg.name.value = target ? cfg.name : '';
       $cfg.baseUrl.value = cfg.baseUrl || '';
       $cfg.apiKey.value = target ? (cfg.apiKey || '') : '';
-      Store.pendingModel = cfg.model || '';
       $cfg.authMode.value = cfg.authMode || 'bearer';
       $cfg.maxTokens.value = cfg.maxTokens || 1024;
       $cfg.timeout.value = cfg.timeout || 120000;
@@ -224,17 +239,18 @@
       $cfg.imageSize.value = cfg.imageSize || '1024x1024';
       Util.el('view-endpoints').classList.toggle('is-image', group === 'Image');
       Util.el('delete-endpoint').hidden = !Store.editingId;
-      // A saved endpoint keeps its detected models; a new form must detect first.
+      // A saved endpoint keeps its detected models + enabled subset; a new form
+      // must detect first.
       Store.detectedModels = target && target.models && target.models.length ? target.models.slice() : null;
+      Store.enabledModels = target && Array.isArray(target.enabledModels) ? target.enabledModels.slice() : [];
       Store.detectOk = !!(Store.detectedModels && Store.detectedModels.length);
       Config.buildTabs();
       Config.buildEndpointList();
       Config.summary();
       Config.renderModels(target ? target.modelsSyncedAt : null);
-      Config.fillModelOptions(Store.pendingModel);
       Config.updateGate();
       Util.el('endpoints-output').innerHTML = list.length ? '' :
-        '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击“检测模型列表”，通过后即可保存。</div>';
+        '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击“检测模型列表”，勾选要启用的模型即可保存。</div>';
     },
 
     readForm() {
@@ -244,7 +260,6 @@
         name: $cfg.name.value.trim(),
         baseUrl: $cfg.baseUrl.value.trim(),
         apiKey: $cfg.apiKey.value.trim(),
-        model: $cfg.model.value.trim(),
         authMode: $cfg.authMode.value,
         maxTokens: Number($cfg.maxTokens.value || 1024),
         timeout: Number($cfg.timeout.value || 120000),
@@ -264,13 +279,18 @@
         out.innerHTML = '<div class="warn-box">请先点击“检测模型列表”，检测通过后才能保存。</div>';
         return;
       }
+      if (!Store.enabledModels.length) {
+        out.innerHTML = '<div class="warn-box">请至少勾选一个要启用的模型。</div>';
+        return;
+      }
       form.models = Store.detectedModels;
+      form.enabledModels = Store.enabledModels;
       try {
         const data = await Api.call('/api/admin/endpoints', { method: 'POST', body: JSON.stringify(form) });
         await Config.loadAll();
         Config.fill(form.group, data.config.id);
         Picker.render();
-        out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」（${data.config.models.length} 个模型）。</div>`;
+        out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」（启用 ${data.config.enabledModels.length} / 共 ${data.config.models.length} 个模型）。</div>`;
       } catch (e) {
         out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(e.message)}</div>`;
       }
@@ -289,10 +309,13 @@
         const data = await Api.call('/api/admin/endpoints?action=detect', { method: 'POST', body: JSON.stringify(form) });
         Store.detectedModels = data.models || [];
         Store.detectOk = Store.detectedModels.length > 0;
+        // Keep any previously-enabled models that still exist upstream.
+        const available = new Set(Store.detectedModels);
+        Store.enabledModels = (Store.enabledModels || []).filter((m) => available.has(m));
         Config.renderModels(new Date().toISOString());
         Config.updateGate();
         out.innerHTML = Store.detectOk
-          ? `<div class="ok-box">检测通过，获取到 ${data.count} 个模型。现在可以保存。</div>`
+          ? `<div class="ok-box">检测通过，获取到 ${data.count} 个模型，请勾选要启用的模型后保存。</div>`
           : '<div class="warn-box">连接成功，但该渠道未返回任何模型。</div>';
       } catch (e) {
         Store.detectOk = false;
@@ -330,50 +353,70 @@
       }
     },
 
-    // Save is allowed only once the current form has passed detection.
+    // Save is allowed only once the form has passed detection AND at least one
+    // model is enabled.
     updateGate() {
       const btn = Util.el('save-endpoint');
-      if (btn) btn.disabled = !Store.detectOk;
+      if (btn) btn.disabled = !(Store.detectOk && Store.enabledModels && Store.enabledModels.length);
       const sync = Util.el('sync-models');
       if (sync) sync.hidden = !Store.editingId;
     },
 
-    // Populate the Model <select> from the detected list. Until a channel is
-    // detected there are no options and the field stays disabled — you pick a
-    // model from what the channel actually offers, you don't type it.
-    fillModelOptions(preferred) {
-      const sel = $cfg.model;
-      if (!sel) return;
-      const models = Store.detectedModels || [];
-      const want = preferred != null ? preferred : sel.value;
-      if (!models.length) {
-        sel.innerHTML = '<option value="">先检测模型列表，再从中选择</option>';
-        sel.value = '';
-        sel.disabled = true;
-        return;
-      }
-      sel.innerHTML = models.map((m) => `<option value="${Util.escapeAttr(m)}">${Util.escapeHtml(m)}</option>`).join('');
-      sel.disabled = false;
-      sel.value = models.includes(want) ? want : models[0];
-      Config.summary();
+    // Toggle one model in the enabled subset, then refresh count + save gate.
+    toggleEnabled(model, on) {
+      const set = new Set(Store.enabledModels || []);
+      if (on) set.add(model); else set.delete(model);
+      // Preserve detected order.
+      Store.enabledModels = (Store.detectedModels || []).filter((m) => set.has(m));
+      Config.renderModelsHead();
+      Config.updateGate();
     },
 
+    setAllEnabled(on) {
+      Store.enabledModels = on ? (Store.detectedModels || []).slice() : [];
+      Config.renderModels(Store.lastSyncedAt);
+      Config.updateGate();
+    },
+
+    renderModelsHead() {
+      const head = Util.el('endpoints-models-head');
+      if (!head) return;
+      const total = (Store.detectedModels || []).length;
+      const on = (Store.enabledModels || []).length;
+      const when = Store.lastSyncedAt ? ` · 同步于 ${new Date(Store.lastSyncedAt).toLocaleString()}` : '';
+      head.textContent = `已启用 ${on} / 共 ${total} 个模型${when}`;
+    },
+
+    // The detect panel IS the model-enabling UI: a checkbox list over the
+    // detected models. Ticking a box enables that model for this endpoint.
     renderModels(syncedAt) {
-      Config.fillModelOptions();
+      Store.lastSyncedAt = syncedAt || null;
       const node = Util.el('endpoints-models');
       if (!node) return;
       const models = Store.detectedModels || [];
       if (!models.length) {
-        node.innerHTML = '<span class="models-hint">尚未检测模型列表。</span>';
+        node.innerHTML = '<span class="models-hint">尚未检测模型列表。填写 API Key 后点击“检测模型列表”。</span>';
         return;
       }
-      const when = syncedAt ? ` · 同步于 ${new Date(syncedAt).toLocaleString()}` : '';
-      const shown = models.slice(0, 40).map((m) => `<span class="model-pill" data-model="${Util.escapeAttr(m)}">${Util.escapeHtml(m)}</span>`).join('');
-      const more = models.length > 40 ? `<span class="models-hint">…还有 ${models.length - 40} 个</span>` : '';
-      node.innerHTML = `<div class="models-head">已检测 ${models.length} 个模型${when}</div><div class="models-list">${shown}${more}</div>`;
-      // Clicking a pill selects that model in the dropdown.
-      node.querySelectorAll('.model-pill').forEach((pill) => {
-        pill.addEventListener('click', () => { $cfg.model.value = pill.dataset.model; Config.summary(); });
+      const enabled = new Set(Store.enabledModels || []);
+      const items = models.map((m) => {
+        const on = enabled.has(m) ? ' checked' : '';
+        return `<label class="model-pick${on ? ' on' : ''}"><input type="checkbox" data-model="${Util.escapeAttr(m)}"${on}><span>${Util.escapeHtml(m)}</span></label>`;
+      }).join('');
+      node.innerHTML =
+        `<div class="models-head"><span id="endpoints-models-head"></span>` +
+        `<span class="models-actions"><button type="button" class="link-btn" data-all="1">全选</button>` +
+        `<button type="button" class="link-btn" data-all="0">全不选</button></span></div>` +
+        `<div class="models-picks">${items}</div>`;
+      Config.renderModelsHead();
+      node.querySelectorAll('.model-pick input').forEach((box) => {
+        box.addEventListener('change', () => {
+          box.closest('.model-pick').classList.toggle('on', box.checked);
+          Config.toggleEnabled(box.dataset.model, box.checked);
+        });
+      });
+      node.querySelectorAll('.models-actions .link-btn').forEach((btn) => {
+        btn.addEventListener('click', () => Config.setAllEnabled(btn.dataset.all === '1'));
       });
     },
 
@@ -470,11 +513,14 @@
       const selected = new Set(Store.selectedIds(group));
       Store.selected[group] = [...selected];
 
+      const epRow = document.createElement('div');
+      epRow.className = 'picker-row';
       const label = document.createElement('span');
       label.className = 'picker-label';
       label.textContent = '端点';
-      host.appendChild(label);
+      epRow.appendChild(label);
 
+      let modelPairs = 0;
       for (const ep of list) {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -488,12 +534,47 @@
           btn.appendChild(warn);
         }
         btn.addEventListener('click', () => Picker.toggle(ep.id));
-        host.appendChild(btn);
+        epRow.appendChild(btn);
+      }
+      host.appendChild(epRow);
+
+      // For every selected endpoint, a sub-row of its enabled models. The chosen
+      // models default to all enabled and drive the (question × endpoint × model) run.
+      for (const id of selected) {
+        const ep = Store.endpoint(group, id);
+        if (!ep) continue;
+        const enabled = ep.enabledModels || [];
+        const row = document.createElement('div');
+        row.className = 'picker-row picker-models';
+        const tag = document.createElement('span');
+        tag.className = 'picker-sublabel';
+        tag.textContent = `${ep.name || '(未命名)'} · 模型`;
+        row.appendChild(tag);
+        if (!enabled.length) {
+          const none = document.createElement('span');
+          none.className = 'picker-summary';
+          none.textContent = '该端点未启用任何模型';
+          row.appendChild(none);
+          host.appendChild(row);
+          continue;
+        }
+        const chosen = new Set(Store.selectedModelIds(group, id));
+        for (const m of enabled) {
+          const on = chosen.has(m);
+          if (on) modelPairs++;
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'pick-chip model-chip' + (on ? ' active' : '');
+          chip.textContent = m;
+          chip.addEventListener('click', () => Picker.toggleModel(id, m));
+          row.appendChild(chip);
+        }
+        host.appendChild(row);
       }
 
-      const summary = document.createElement('span');
-      summary.className = 'picker-summary';
-      summary.textContent = `已选 ${selected.size} / ${list.length}`;
+      const summary = document.createElement('div');
+      summary.className = 'picker-summary picker-total';
+      summary.textContent = `已选 ${selected.size} 端点 · ${modelPairs} 个模型运行`;
       host.appendChild(summary);
     },
 
@@ -502,6 +583,17 @@
       const set = new Set(Store.selectedIds(group));
       if (set.has(id)) set.delete(id); else set.add(id);
       Store.selected[group] = [...set];
+      Picker.render();
+    },
+
+    toggleModel(id, model) {
+      const group = Store.activeGroup;
+      const set = new Set(Store.selectedModelIds(group, id));
+      if (set.has(model)) set.delete(model); else set.add(model);
+      // Preserve enabled order.
+      const ep = Store.endpoint(group, id);
+      const ordered = ((ep && ep.enabledModels) || []).filter((m) => set.has(m));
+      Store.setSelectedModelIds(group, id, ordered);
       Picker.render();
     }
   };
@@ -997,7 +1089,7 @@
         const cost = list.reduce((s, x) => s + Number(x.result.estimated_cost_usd || 0), 0);
         meta.innerHTML = [
           Util.badge(`${okN}/${list.length} OK`, anyFail ? 'fail' : 'ok'),
-          Util.badge(`${list.length} 端点`),
+          Util.badge(`${list.length} 组运行`),
           cost ? Util.badge(`$${Util.formatCost(cost)}`, 'info') : ''
         ].filter(Boolean).join('');
       }
@@ -1007,12 +1099,13 @@
       host.innerHTML = '';
       host.classList.toggle('multi', list.length > 1);
 
-      for (const { endpoint, result } of list) {
+      for (const { endpoint, model, result } of list) {
         const panel = document.createElement('div');
         panel.className = 'result-endpoint ' + (result.ok ? 'ok' : 'fail');
         const head = document.createElement('div');
         head.className = 'result-ep-head';
-        head.innerHTML = `<span class="result-ep-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>
+        const modelTag = model ? `<span class="result-ep-model">${Util.escapeHtml(model)}</span>` : '';
+        head.innerHTML = `<span class="result-ep-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}
           <span class="result-ep-badges">${Cards.badgeRow(result)}</span>`;
         panel.appendChild(head);
         const body = document.createElement('div');
@@ -1093,13 +1186,18 @@
     selectedTargets() {
       const group = Store.activeGroup;
       const ids = Store.selectedIds(group);
-      const targets = ids
-        .map((id) => Store.endpoint(group, id))
-        .filter(Boolean)
-        .map((ep) => ({ endpoint: ep, cfg: cfgToRunPayload(ep) }))
-        .filter((t) => t.cfg.apiKey);
+      const targets = [];
+      for (const id of ids) {
+        const ep = Store.endpoint(group, id);
+        if (!ep) continue;
+        const models = Store.selectedModelIds(group, id);
+        for (const model of models) {
+          const cfg = cfgToRunPayload(ep, model);
+          if (cfg.apiKey) targets.push({ endpoint: ep, model, cfg });
+        }
+      }
       if (!targets.length) {
-        UI.flash('请先在端点管理为所选端点配置 API Key', 'error');
+        UI.flash('请先在端点管理为所选端点配置 API Key 并启用模型', 'error');
         Router.show('endpoints', group);
         return null;
       }
@@ -1131,7 +1229,7 @@
     // Run a single question against all targets; store + return [{endpoint, result}].
     async runAcross(q, targets, batchId) {
       const list = [];
-      for (const { endpoint, cfg } of targets) {
+      for (const { endpoint, model, cfg } of targets) {
         if (Store.stopFlag) break;
         const controller = new AbortController();
         Store.inflight.add(controller);
@@ -1144,8 +1242,8 @@
         } finally {
           Store.inflight.delete(controller);
         }
-        list.push({ endpoint, result });
-        Store.resultsById.set(`${q.id}::${endpoint.id}`, Object.assign({ endpoint_name: endpoint.name }, result));
+        list.push({ endpoint, model, result });
+        Store.resultsById.set(`${q.id}::${endpoint.id}::${model}`, Object.assign({ endpoint_name: endpoint.name, model_id: model }, result));
         if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
       }
       return list;
@@ -1161,7 +1259,7 @@
       UI.refreshControls();
 
       const qs = Store.questionsForGroup(Store.activeGroup).filter((q) => !Cards.isHiddenByFilter(q));
-      const total = qs.length * targets.length; // question × endpoint pairs
+      const total = qs.length * targets.length; // question × (endpoint × model) pairs
       let next = 0, done = 0;
       const concurrency = Math.max(1, Math.min(20, Number(Util.el('opt-concurrency').value || 1)));
       const collapseAfter = Util.el('opt-collapse-after').checked;
@@ -1179,7 +1277,7 @@
           Cards.toggle(card, true);
           UI.flash(`${done}/${total} · ${q.name}`, 'running');
           const list = [];
-          for (const { endpoint, cfg } of targets) {
+          for (const { endpoint, model, cfg } of targets) {
             if (Store.stopFlag) break;
             const controller = new AbortController();
             Store.inflight.add(controller);
@@ -1195,8 +1293,8 @@
               UI.flash(`${done}/${total}`, 'running');
               UI.progress(done, total);
             }
-            list.push({ endpoint, result });
-            Store.resultsById.set(`${q.id}::${endpoint.id}`, Object.assign({ endpoint_name: endpoint.name }, result));
+            list.push({ endpoint, model, result });
+            Store.resultsById.set(`${q.id}::${endpoint.id}::${model}`, Object.assign({ endpoint_name: endpoint.name, model_id: model }, result));
             if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
           }
           Cards.renderResults(card, list);
@@ -1308,7 +1406,6 @@
       name: Util.el('cfg-name'),
       baseUrl: Util.el('cfg-baseUrl'),
       apiKey: Util.el('cfg-apiKey'),
-      model: Util.el('cfg-model'),
       authMode: Util.el('cfg-authMode'),
       maxTokens: Util.el('cfg-maxTokens'),
       timeout: Util.el('cfg-timeout'),
@@ -1347,7 +1444,6 @@
     Util.el('detect-models').addEventListener('click', Config.detect);
     Util.el('sync-models').addEventListener('click', Config.sync);
     $cfg.name.addEventListener('input', Config.summary);
-    $cfg.model.addEventListener('input', Config.summary);
     // Changing the URL/key/auth invalidates a prior detection (must re-detect to save).
     $cfg.baseUrl.addEventListener('input', () => { Config.summary(); Config.invalidateDetect(); });
     $cfg.apiKey.addEventListener('input', Config.invalidateDetect);
