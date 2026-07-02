@@ -128,6 +128,7 @@
     editingId: null,        // endpoint id loaded in the editor; null = new endpoint
     detectedModels: null,   // model list from the last successful detect (for save)
     detectOk: false,        // has the current form passed model detection?
+    pendingModel: '',       // saved model to preselect once options are populated
     configs: {},            // group -> array of endpoints loaded from the database
     selected: {},           // group -> array of selected endpoint ids (for the next run)
     sessionUser: null,
@@ -212,7 +213,7 @@
       $cfg.name.value = target ? cfg.name : '';
       $cfg.baseUrl.value = cfg.baseUrl || '';
       $cfg.apiKey.value = target ? (cfg.apiKey || '') : '';
-      $cfg.model.value = cfg.model || '';
+      Store.pendingModel = cfg.model || '';
       $cfg.authMode.value = cfg.authMode || 'bearer';
       $cfg.maxTokens.value = cfg.maxTokens || 1024;
       $cfg.timeout.value = cfg.timeout || 120000;
@@ -230,6 +231,7 @@
       Config.buildEndpointList();
       Config.summary();
       Config.renderModels(target ? target.modelsSyncedAt : null);
+      Config.fillModelOptions(Store.pendingModel);
       Config.updateGate();
       Util.el('endpoints-output').innerHTML = list.length ? '' :
         '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击“检测模型列表”，通过后即可保存。</div>';
@@ -336,7 +338,28 @@
       if (sync) sync.hidden = !Store.editingId;
     },
 
+    // Populate the Model <select> from the detected list. Until a channel is
+    // detected there are no options and the field stays disabled — you pick a
+    // model from what the channel actually offers, you don't type it.
+    fillModelOptions(preferred) {
+      const sel = $cfg.model;
+      if (!sel) return;
+      const models = Store.detectedModels || [];
+      const want = preferred != null ? preferred : sel.value;
+      if (!models.length) {
+        sel.innerHTML = '<option value="">先检测模型列表，再从中选择</option>';
+        sel.value = '';
+        sel.disabled = true;
+        return;
+      }
+      sel.innerHTML = models.map((m) => `<option value="${Util.escapeAttr(m)}">${Util.escapeHtml(m)}</option>`).join('');
+      sel.disabled = false;
+      sel.value = models.includes(want) ? want : models[0];
+      Config.summary();
+    },
+
     renderModels(syncedAt) {
+      Config.fillModelOptions();
       const node = Util.el('endpoints-models');
       if (!node) return;
       const models = Store.detectedModels || [];
@@ -348,12 +371,10 @@
       const shown = models.slice(0, 40).map((m) => `<span class="model-pill" data-model="${Util.escapeAttr(m)}">${Util.escapeHtml(m)}</span>`).join('');
       const more = models.length > 40 ? `<span class="models-hint">…还有 ${models.length - 40} 个</span>` : '';
       node.innerHTML = `<div class="models-head">已检测 ${models.length} 个模型${when}</div><div class="models-list">${shown}${more}</div>`;
-      // Clicking a pill sets the Model field; also feed the datalist for typeahead.
+      // Clicking a pill selects that model in the dropdown.
       node.querySelectorAll('.model-pill').forEach((pill) => {
         pill.addEventListener('click', () => { $cfg.model.value = pill.dataset.model; Config.summary(); });
       });
-      const dl = Util.el('model-suggestions');
-      if (dl) dl.innerHTML = models.map((m) => `<option value="${Util.escapeAttr(m)}"></option>`).join('');
     },
 
     async remove() {

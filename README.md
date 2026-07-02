@@ -15,7 +15,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - The console uses a grouped sidebar: a Testing section (the five provider groups) and a Platform section (Endpoints, History, Admin).
 - Each type (provider group) can hold multiple named endpoints — e.g. "官方", "代理A", "Azure" — each with its own Base URL / model / API key. Endpoint configuration is stored in PostgreSQL (globally shared); API keys are encrypted at rest. Nothing but the UI theme is kept in browser `localStorage`.
 - The test page has an endpoint picker: run cases against one endpoint, or select several to run the same cases against each and compare results side by side.
-- Adding a channel requires a successful **model-list detection** (calls the channel's `/models` API with its key) before it can be saved; the detected list is stored on the endpoint and drives the Model field. Lists refresh manually (同步模型) or automatically via the `/api/cron/sync-models` daily cron.
+- Adding a channel requires a successful **model-list detection** (calls the channel's `/models` API with its key) before it can be saved. The Model field is a dropdown populated from the detected list — it stays disabled until detection succeeds, so you pick a model the channel actually offers instead of typing one. The detected list is stored on the endpoint. Lists refresh manually (同步模型) or automatically via the `/api/cron/sync-models` daily cron.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
 - TOTP setup returns an otpauth URL rendered client-side as a QR with the qrbtf bundle, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
 

@@ -278,6 +278,7 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
   border-color: var(--text); box-shadow: 0 0 0 3px var(--focus);
 }
 .field select, .tests-actions select { cursor: pointer; }
+.field select:disabled { cursor: not-allowed; color: var(--muted); opacity: 0.75; }
 .image-only { display: none; }
 #view-endpoints.is-image .image-only { display: flex; }
 
