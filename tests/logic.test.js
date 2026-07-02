@@ -123,6 +123,19 @@ assert(rows.some((row) => key(row) === 'Sakana:vercel:sakana/fugu-ultra'));
 assert(!rows.some((row) => row.source_provider === 'openrouter'));
 assert(!rows.some((row) => row.source_provider === 'vercel' && row.model_group !== 'Sakana'));
 
+// Endpoint secret encryption round-trips and degrades gracefully.
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'logic-test-secret';
+const { encryptSecret, decryptSecret } = require('../api/_lib/secrets');
+const cipher = encryptSecret('sk-super-secret-key');
+assert(typeof cipher === 'string' && cipher.startsWith('v1:'));
+assert.notEqual(cipher, 'sk-super-secret-key');
+assert.equal(decryptSecret(cipher), 'sk-super-secret-key');
+assert.equal(encryptSecret(''), null);
+assert.equal(encryptSecret(null), null);
+assert.equal(decryptSecret(null), '');
+assert.equal(decryptSecret('garbage'), '');
+assert.equal(decryptSecret('v1:bad:bad:bad'), '');
+
 const oldNodeEnv = process.env.NODE_ENV;
 const oldSessionSecret = process.env.SESSION_SECRET;
 const oldAuthSecret = process.env.AUTH_SECRET;

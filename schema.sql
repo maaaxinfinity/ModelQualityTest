@@ -76,3 +76,20 @@ create table if not exists model_prices (
 create index if not exists model_prices_lookup_idx on model_prices(model_group, model_alias);
 create index if not exists model_prices_synced_at_idx on model_prices(synced_at desc);
 create index if not exists auth_enrollments_user_mode_idx on auth_enrollments(user_id, mode, created_at desc);
+
+create table if not exists endpoint_configs (
+  model_group text primary key,
+  base_url text,
+  model text,
+  auth_mode text,
+  max_tokens integer,
+  timeout integer,
+  delay integer,
+  system_prompt text,
+  image_n integer,
+  image_quality text,
+  image_size text,
+  api_key_cipher text,
+  updated_by text references app_users(id),
+  updated_at timestamptz not null default now()
+);

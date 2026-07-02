@@ -67,6 +67,32 @@ async function main() {
   assert.equal(run.rows.length, 1);
   assert.equal(run.rows[0].cost_source, 'price_table:openai/gpt-5.5');
 
+  // Endpoint config: encrypt on write, decrypt on read, and key survives a non-key edit.
+  process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'smoke-test-session-secret';
+  const { encryptSecret, decryptSecret } = require('../api/_lib/secrets');
+  await query('delete from endpoint_configs');
+  await query(
+    `insert into endpoint_configs (model_group, base_url, model, auth_mode, api_key_cipher, updated_by)
+     values ('OpenAI','https://api.openai.com','gpt-5.5','bearer',$1,'usr_smoke')`,
+    [encryptSecret('sk-smoke-key')]
+  );
+  let ep = await query('select * from endpoint_configs where model_group=$1', ['OpenAI']);
+  assert.equal(decryptSecret(ep.rows[0].api_key_cipher), 'sk-smoke-key');
+  assert.notEqual(ep.rows[0].api_key_cipher, 'sk-smoke-key');
+
+  // Non-key edit (cipher param null) must coalesce to the existing cipher.
+  await query(
+    `insert into endpoint_configs (model_group, base_url, model, auth_mode, api_key_cipher, updated_by)
+     values ('OpenAI','https://api.openai.com','gpt-5.5-pro','bearer',$1,'usr_smoke')
+     on conflict (model_group) do update set
+       model = excluded.model,
+       api_key_cipher = coalesce(excluded.api_key_cipher, endpoint_configs.api_key_cipher)`,
+    [null]
+  );
+  ep = await query('select * from endpoint_configs where model_group=$1', ['OpenAI']);
+  assert.equal(ep.rows[0].model, 'gpt-5.5-pro');
+  assert.equal(decryptSecret(ep.rows[0].api_key_cipher), 'sk-smoke-key');
+
   console.log(JSON.stringify({ ok: true, prices: priceCount.rows[0].n, run: run.rows[0].id }));
 }
 

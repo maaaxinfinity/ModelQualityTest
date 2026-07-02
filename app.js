@@ -122,8 +122,10 @@
       Sakana: { baseUrl: 'https://api.sakana.ai', model: 'fugu-ultra', authMode: 'bearer' },
       Image: { baseUrl: 'https://api.openai.com', model: 'gpt-image-2', authMode: 'bearer' }
     },
-    LS_PREFIX: 'mqt.config.',
     activeGroup: 'OpenAI',
+    activeView: 'test',     // test | endpoints | history | admin
+    editingGroup: 'OpenAI', // group currently shown in the Endpoints editor
+    configs: {},            // group -> config loaded from the database
     sessionUser: null,
     resultsById: new Map(),
     inflight: new Set(),
@@ -133,8 +135,11 @@
     defaultConfig(group) {
       return Object.assign({
         maxTokens: 1024, timeout: 120000, delay: 300, system: '',
-        imageN: 1, imageQuality: 'medium', imageSize: '1024x1024'
+        imageN: 1, imageQuality: 'medium', imageSize: '1024x1024', apiKey: ''
       }, Store.DEFAULTS[group]);
+    },
+    configFor(group) {
+      return Object.assign(Store.defaultConfig(group), Store.configs[group] || {});
     },
     questionsForGroup(group) {
       return window.QUESTIONS.filter((q) => q.group === group);
@@ -144,70 +149,125 @@
   // cached config field refs (filled in boot)
   let $cfg = {};
 
-  function loadGroupConfig() {
-    const defaults = Store.defaultConfig(Store.activeGroup);
-    let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(Store.LS_PREFIX + Store.activeGroup) || '{}'); }
-    catch (e) { saved = {}; }
-    const cfg = Object.assign({}, defaults, saved);
-    $cfg.baseUrl.value = cfg.baseUrl || defaults.baseUrl;
-    $cfg.apiKey.value = cfg.apiKey || '';
-    $cfg.model.value = cfg.model || defaults.model;
-    $cfg.authMode.value = cfg.authMode || defaults.authMode;
-    $cfg.maxTokens.value = cfg.maxTokens || 1024;
-    $cfg.timeout.value = cfg.timeout || 120000;
-    $cfg.delay.value = cfg.delay || 300;
-    $cfg.system.value = cfg.system || '';
-    $cfg.imageN.value = cfg.imageN || 1;
-    $cfg.imageQuality.value = cfg.imageQuality || 'medium';
-    $cfg.imageSize.value = cfg.imageSize || '1024x1024';
-    $cfg.remember.checked = !!cfg.remember;
-    updateConfigSummary();
-  }
-
-  function saveGroupConfig() {
-    if (!$cfg.remember.checked) {
-      localStorage.removeItem(Store.LS_PREFIX + Store.activeGroup);
-      updateConfigSummary();
-      return;
-    }
-    localStorage.setItem(Store.LS_PREFIX + Store.activeGroup, JSON.stringify(readCfg(true)));
-    updateConfigSummary();
-  }
-
-  function readCfg(includeRemember) {
-    const cfg = {
-      group: Store.activeGroup,
-      baseUrl: $cfg.baseUrl.value.trim(),
-      apiKey: $cfg.apiKey.value.trim(),
-      model: $cfg.model.value.trim() || Store.DEFAULTS[Store.activeGroup].model,
-      authMode: $cfg.authMode.value,
-      maxTokens: Number($cfg.maxTokens.value || 1024),
-      timeout: Number($cfg.timeout.value || 120000),
-      delay: Number($cfg.delay.value || 0),
-      system: $cfg.system.value,
+  // Turn a stored config object into the shape /api/run-test expects.
+  function cfgToRunPayload(c) {
+    return {
+      group: c.group,
+      baseUrl: (c.baseUrl || '').trim(),
+      apiKey: (c.apiKey || '').trim(),
+      model: (c.model || '').trim() || Store.DEFAULTS[c.group].model,
+      authMode: c.authMode || 'bearer',
+      maxTokens: Number(c.maxTokens || 1024),
+      timeout: Number(c.timeout || 120000),
+      delay: Number(c.delay || 0),
+      system: c.system || '',
       image: {
-        n: Number($cfg.imageN.value || 1),
-        quality: $cfg.imageQuality.value,
-        size: $cfg.imageSize.value.trim() || '1024x1024'
+        n: Number(c.imageN || 1),
+        quality: c.imageQuality || 'medium',
+        size: (c.imageSize || '1024x1024').trim() || '1024x1024'
       }
     };
-    if (includeRemember) {
-      cfg.remember = $cfg.remember.checked;
-      cfg.imageN = cfg.image.n;
-      cfg.imageQuality = cfg.image.quality;
-      cfg.imageSize = cfg.image.size;
-    }
-    return cfg;
   }
 
-  function updateConfigSummary() {
-    const node = Util.el('config-summary');
-    if (!node) return;
-    let host = '';
-    try { host = new URL($cfg.baseUrl.value).host; } catch (e) { host = ''; }
-    node.textContent = `· ${$cfg.model.value || ''}${host ? ' @ ' + host : ''}`;
-  }
+  /* ───────────────────────── Config (DB-backed) ───────────────────────── */
+  const Config = {
+    // Load every group's config from the database into Store.configs.
+    async loadAll() {
+      try {
+        const data = await Api.call('/api/admin/endpoints', { method: 'GET', headers: {} });
+        const byGroup = data.configs || {};
+        Store.configs = {};
+        for (const group of Store.GROUPS) {
+          Store.configs[group] = Object.assign(Store.defaultConfig(group), byGroup[group] || { group });
+          Store.configs[group].group = group;
+        }
+      } catch (e) {
+        // No session yet, or transient failure — fall back to defaults so the UI still works.
+        Store.configs = {};
+        for (const group of Store.GROUPS) Store.configs[group] = Store.defaultConfig(group);
+      }
+    },
+
+    // Populate the Endpoints form from Store.configs for the editing group.
+    fill(group) {
+      Store.editingGroup = group;
+      const cfg = Store.configFor(group);
+      $cfg.baseUrl.value = cfg.baseUrl || '';
+      $cfg.apiKey.value = cfg.apiKey || '';
+      $cfg.model.value = cfg.model || '';
+      $cfg.authMode.value = cfg.authMode || 'bearer';
+      $cfg.maxTokens.value = cfg.maxTokens || 1024;
+      $cfg.timeout.value = cfg.timeout || 120000;
+      $cfg.delay.value = cfg.delay || 300;
+      $cfg.system.value = cfg.system || '';
+      $cfg.imageN.value = cfg.imageN || 1;
+      $cfg.imageQuality.value = cfg.imageQuality || 'medium';
+      $cfg.imageSize.value = cfg.imageSize || '1024x1024';
+      Util.el('view-endpoints').classList.toggle('is-image', group === 'Image');
+      Config.buildTabs();
+      Config.summary();
+    },
+
+    // Read the Endpoints form into a config object for the editing group.
+    readForm() {
+      return {
+        group: Store.editingGroup,
+        baseUrl: $cfg.baseUrl.value.trim(),
+        apiKey: $cfg.apiKey.value.trim(),
+        model: $cfg.model.value.trim(),
+        authMode: $cfg.authMode.value,
+        maxTokens: Number($cfg.maxTokens.value || 1024),
+        timeout: Number($cfg.timeout.value || 120000),
+        delay: Number($cfg.delay.value || 0),
+        system: $cfg.system.value,
+        imageN: Number($cfg.imageN.value || 1),
+        imageQuality: $cfg.imageQuality.value,
+        imageSize: $cfg.imageSize.value.trim() || '1024x1024'
+      };
+    },
+
+    async save() {
+      const out = Util.el('endpoints-output');
+      const form = Config.readForm();
+      try {
+        const data = await Api.call('/api/admin/endpoints', { method: 'POST', body: JSON.stringify(form) });
+        Store.configs[form.group] = Object.assign(Store.defaultConfig(form.group), data.config, { group: form.group });
+        Config.fill(form.group);
+        out.innerHTML = `<div class="ok-box">已保存 ${Util.escapeHtml(form.group)} 端点配置。</div>`;
+      } catch (e) {
+        out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(e.message)}</div>`;
+      }
+    },
+
+    buildTabs() {
+      const host = Util.el('ep-group-tabs');
+      if (!host) return;
+      host.innerHTML = '';
+      for (const group of Store.GROUPS) {
+        const cfg = Store.configs[group] || {};
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ep-tab' + (group === Store.editingGroup ? ' active' : '');
+        btn.textContent = group;
+        if (cfg.hasApiKey || cfg.apiKey) {
+          const dot = document.createElement('span');
+          dot.className = 'ep-dot';
+          dot.title = '已配置 API Key';
+          btn.appendChild(dot);
+        }
+        btn.addEventListener('click', () => Config.fill(group));
+        host.appendChild(btn);
+      }
+    },
+
+    summary() {
+      const node = Util.el('endpoints-summary');
+      if (!node) return;
+      let host = '';
+      try { host = new URL($cfg.baseUrl.value).host; } catch (e) { host = ''; }
+      node.textContent = `· ${Store.editingGroup} · ${$cfg.model.value || ''}${host ? ' @ ' + host : ''}`;
+    }
+  };
 
   /* ───────────────────────── Theme ───────────────────────── */
   const Theme = {
@@ -252,7 +312,7 @@
       document.body.classList.toggle('authed', authed);
 
       const chip = Util.el('account-chip');
-      const adminBar = Util.el('admin-bar');
+      const platformSection = Util.el('platform-section');
 
       if (authed) {
         chip.hidden = false;
@@ -270,16 +330,18 @@
         Util.el('rotate-2fa').addEventListener('click', Auth.startRotation);
         Util.el('logout').addEventListener('click', Auth.logout);
 
-        adminBar.hidden = status.user.role !== 'admin';
+        platformSection.hidden = status.user.role !== 'admin';
         if (status.insecureDevSecret) {
           Auth.sessionPanel(`<div class="warn-box">SESSION_SECRET 使用了不安全的默认值，请在部署环境配置强随机密钥。</div>`);
         }
+        // Endpoint config lives in the database; load it once authenticated.
+        Config.loadAll().then(() => { if (Store.activeView === 'endpoints') Config.fill(Store.editingGroup); });
         return;
       }
 
       // locked
       chip.hidden = true;
-      adminBar.hidden = true;
+      platformSection.hidden = true;
       Util.el('auth-output').innerHTML = '';
       if (status.setupRequired) Auth.renderSetup();
       else Auth.renderLogin();
@@ -483,8 +545,7 @@
     async createInvite() {
       try {
         const data = await Api.call('/api/admin/invites', { method: 'POST', body: JSON.stringify({ maxUses: 1, expiresHours: 168 }) });
-        Admin.out().innerHTML = `<div class="ok-box">邀请码：<code>${Util.escapeHtml(data.code)}</code></div>`;
-        await Admin.refreshLogs();
+        Admin.out().innerHTML = `<div class="ok-box">邀请码：<code>${Util.escapeHtml(data.code)}</code> · 有效期 7 天</div>`;
       } catch (e) { Admin.fail(e); }
     },
 
@@ -507,12 +568,17 @@
       } catch (e) { Admin.fail(e); }
     },
 
+    historyOut() { return Util.el('history-output'); },
+
     async refreshLogs() {
+      const out = Admin.historyOut();
       try {
-        const g = Store.activeGroup ? `&group=${encodeURIComponent(Store.activeGroup)}` : '';
-        const data = await Api.call(`/api/admin/logs?limit=20${g}`, { method: 'GET', headers: {} });
-        Admin.out().innerHTML = Admin.logTable(data.logs || []);
-      } catch (e) { Admin.fail(e); }
+        const sel = Util.el('history-group');
+        const group = sel ? sel.value : '';
+        const g = group ? `&group=${encodeURIComponent(group)}` : '';
+        const data = await Api.call(`/api/admin/logs?limit=50${g}`, { method: 'GET', headers: {} });
+        out.innerHTML = Admin.logTable(data.logs || []);
+      } catch (e) { out.innerHTML = `<div class="warn-box">失败：${Util.escapeHtml(e.message)}</div>`; }
     },
 
     logTable(logs) {
@@ -745,9 +811,8 @@
   const Runner = {
     async runOne(q, card) {
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const cfg = readCfg(false);
-      if (!cfg.apiKey) return UI.flash('缺少 API Key', 'error');
-      saveGroupConfig();
+      const cfg = cfgToRunPayload(Store.configFor(Store.activeGroup));
+      if (!cfg.apiKey) { UI.flash('请先在端点管理配置 API Key', 'error'); return Router.show('endpoints', Store.activeGroup); }
       Store.stopFlag = false;
       Cards.setBusy(card, true);
       Cards.toggle(card, true);
@@ -773,9 +838,8 @@
     async runGroup() {
       if (Store.batchRunning) return;
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const cfg = readCfg(false);
-      if (!cfg.apiKey) return UI.flash('缺少 API Key', 'error');
-      saveGroupConfig();
+      const cfg = cfgToRunPayload(Store.configFor(Store.activeGroup));
+      if (!cfg.apiKey) { UI.flash('请先在端点管理配置 API Key', 'error'); return Router.show('endpoints', Store.activeGroup); }
       Store.stopFlag = false;
       Store.batchRunning = true;
       UI.refreshControls();
@@ -823,8 +887,7 @@
       UI.refreshControls();
       UI.flash(Store.stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, Store.stopFlag ? 'error' : 'done');
       setTimeout(UI.hideProgress, 1200);
-      const adminBar = Util.el('admin-bar');
-      if (adminBar && !adminBar.hidden) Admin.refreshLogs();
+      if (Store.activeView === 'history') Admin.refreshLogs();
     },
 
     stop() {
@@ -846,6 +909,40 @@
     URL.revokeObjectURL(url);
   }
 
+  /* ───────────────────────── Router (views) ───────────────────────── */
+  const VIEW_META = {
+    endpoints: { title: '端点管理', desc: '配置各分组的 Base URL、模型、鉴权与 API Key，保存到数据库（全局共享）。' },
+    history: { title: '测试历史', desc: '查看并导出已记录的测试运行日志。' },
+    admin: { title: '管理', desc: '邀请新管理员、查看系统状态、同步模型价格。' }
+  };
+
+  const Router = {
+    // view: 'test' | 'endpoints' | 'history' | 'admin'; group optional (for endpoints/test)
+    show(view, group) {
+      Store.activeView = view;
+      document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
+      // nav highlight
+      document.querySelectorAll('#group-nav .nav-item').forEach((b) =>
+        b.classList.toggle('active', view === 'test' && b.dataset.group === Store.activeGroup));
+      document.querySelectorAll('#platform-nav .nav-item').forEach((b) =>
+        b.classList.toggle('active', b.dataset.view === view));
+
+      const title = Util.el('page-title');
+      const desc = Util.el('page-desc');
+      if (view === 'test') {
+        if (title) title.textContent = Store.activeGroup;
+        if (desc) desc.textContent = Store.GROUP_DESC[Store.activeGroup] || '';
+      } else {
+        const meta = VIEW_META[view] || {};
+        if (title) title.textContent = meta.title || view;
+        if (desc) desc.textContent = meta.desc || '';
+      }
+
+      if (view === 'endpoints') Config.fill(group || Store.editingGroup);
+      if (view === 'history') Admin.refreshLogs();
+    }
+  };
+
   /* ───────────────────────── Group switching ───────────────────────── */
   function buildGroupNav() {
     const host = Util.el('group-nav');
@@ -863,16 +960,13 @@
 
   function applyGroup(group, silent) {
     Store.activeGroup = group;
-    loadGroupConfig();
     document.body.dataset.group = group;
-    document.querySelectorAll('#group-nav .nav-item').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.group === group);
-    });
     const title = Util.el('page-title');
     const desc = Util.el('page-desc');
     if (title) title.textContent = group;
     if (desc) desc.textContent = Store.GROUP_DESC[group] || '';
     Cards.renderList();
+    Router.show('test');
     if (!silent) UI.flash(group, 'done');
   }
 
@@ -894,7 +988,6 @@
       timeout: Util.el('cfg-timeout'),
       delay: Util.el('cfg-delay'),
       system: Util.el('cfg-system'),
-      remember: Util.el('cfg-remember'),
       imageN: Util.el('cfg-image-n'),
       imageQuality: Util.el('cfg-image-quality'),
       imageSize: Util.el('cfg-image-size')
@@ -903,14 +996,11 @@
     buildGroupNav();
     bindEvents();
     applyGroup('OpenAI', true);
-    loadGroupConfig();
     Cards.renderList();
     Auth.refresh();
   }
 
   function bindEvents() {
-    Util.el('config-toggle').addEventListener('click', () => Util.el('config-panel').classList.toggle('collapsed'));
-
     Util.el('run-all').addEventListener('click', Runner.runGroup);
     Util.el('stop').addEventListener('click', Runner.stop);
     Util.el('clear-results').addEventListener('click', Cards.clearResults);
@@ -920,18 +1010,32 @@
     Util.el('collapse-all').addEventListener('click', () => Cards.all().forEach((c) => Cards.toggle(c, false)));
     Util.el('filter-category').addEventListener('change', Cards.applyFilter);
 
+    // Platform nav → switch views
+    document.querySelectorAll('#platform-nav .nav-item').forEach((btn) => {
+      btn.addEventListener('click', () => Router.show(btn.dataset.view));
+    });
+
+    // Endpoints page
+    Util.el('save-endpoint').addEventListener('click', Config.save);
+    $cfg.baseUrl.addEventListener('input', Config.summary);
+    $cfg.model.addEventListener('input', Config.summary);
+
+    // History page
+    Util.el('refresh-logs').addEventListener('click', Admin.refreshLogs);
+    Util.el('export-logs').addEventListener('click', Admin.exportCsv);
+    Util.el('history-group').addEventListener('change', Admin.refreshLogs);
+
+    // Admin page
     Util.el('create-invite').addEventListener('click', Admin.createInvite);
     Util.el('system-status').addEventListener('click', Admin.systemStatus);
     Util.el('sync-prices').addEventListener('click', Admin.syncPrices);
-    Util.el('refresh-logs').addEventListener('click', Admin.refreshLogs);
-    Util.el('export-logs').addEventListener('click', Admin.exportCsv);
 
-    for (const node of Object.values($cfg)) {
-      if (!node) continue;
-      node.addEventListener('change', saveGroupConfig);
+    // Populate the history group filter from the providers
+    const hist = Util.el('history-group');
+    if (hist) {
+      hist.innerHTML = '<option value="">全部分组</option>' +
+        Store.GROUPS.map((g) => `<option value="${Util.escapeAttr(g)}">${Util.escapeHtml(g)}</option>`).join('');
     }
-    $cfg.baseUrl.addEventListener('input', updateConfigSummary);
-    $cfg.model.addEventListener('input', updateConfigSummary);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

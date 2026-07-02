@@ -122,6 +122,23 @@ async function ensureSchema() {
 
       create index if not exists model_prices_lookup_idx on model_prices(model_group, model_alias);
       create index if not exists model_prices_synced_at_idx on model_prices(synced_at desc);
+
+      create table if not exists endpoint_configs (
+        model_group text primary key,
+        base_url text,
+        model text,
+        auth_mode text,
+        max_tokens integer,
+        timeout integer,
+        delay integer,
+        system_prompt text,
+        image_n integer,
+        image_quality text,
+        image_size text,
+        api_key_cipher text,
+        updated_by text references app_users(id),
+        updated_at timestamptz not null default now()
+      );
     `);
     await query('alter table app_users add column if not exists last_totp_counter bigint');
     await query('alter table auth_enrollments add column if not exists user_id text references app_users(id)');

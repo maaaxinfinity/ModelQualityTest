@@ -12,6 +12,8 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Every test run is logged to PostgreSQL and can be exported from the admin panel.
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
+- The console uses a grouped sidebar: a Testing section (the five provider groups) and a Platform section (Endpoints, History, Admin).
+- Endpoint configuration is stored in PostgreSQL (globally shared); API keys are encrypted at rest. Nothing but the UI theme is kept in browser `localStorage`.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
 - TOTP setup returns an otpauth URL rendered client-side as a QR with the qrbtf bundle, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
 
@@ -100,4 +102,6 @@ DATABASE_URL='postgresql://user@%2Fvar%2Frun%2Fpostgresql/dbname' PGSSLMODE=disa
 
 ## Security Notes
 
-The app is not intended to be fully public. Server APIs require a signed session, and admin-only endpoints require an admin role. API keys are entered per browser session and sent to the backend only for the requested model test; they are not stored in PostgreSQL logs.
+The app is not intended to be fully public. Server APIs require a signed session, and admin-only endpoints require an admin role.
+
+Endpoint configuration (Base URL, model, auth mode, limits, and the API key) is stored in PostgreSQL and shared globally across all admins. API keys are encrypted at rest with AES-256-GCM (`api/_lib/secrets.js`) using a key derived from `SESSION_SECRET`; they are decrypted server-side only for admins editing the Endpoints page and for outbound test calls. Keys are never written to the `test_runs` logs. Rotating `SESSION_SECRET` makes previously stored keys undecryptable — they degrade to empty and must be re-entered, the same trade-off the signed session cookies already make.

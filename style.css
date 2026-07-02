@@ -250,12 +250,8 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px;
 }
-.config-block .block-head { cursor: pointer; user-select: none; }
 .block-head h2 { margin: 0; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
 .block-head .muted { color: var(--text-3); font-weight: 400; font-size: 12.5px; }
-.block-head .chevron { color: var(--text-3); transition: transform .18s; }
-.config-block.collapsed .chevron { transform: rotate(-90deg); }
-.config-block.collapsed .block-body { display: none; }
 .block-body { padding: 4px 18px 20px; }
 .block-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .block-actions button { font-size: 12.5px; padding: 5px 11px; min-height: 30px; }
@@ -284,9 +280,30 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 }
 .field select, .tests-actions select { cursor: pointer; }
 .image-only { display: none; }
-body[data-group="Image"] .image-only { display: flex; }
+#view-endpoints.is-image .image-only { display: flex; }
 
 .checkbox-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+
+/* Views (toggled by the router) */
+.view { display: none; }
+.view.active { display: block; }
+
+/* Sidebar nav grouping */
+.nav-section { display: flex; flex-direction: column; }
+.nav-section + .nav-section { margin-top: 8px; }
+
+/* Endpoint group tabs */
+.ep-group-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 18px; }
+.ep-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; min-height: 32px;
+  border: 1px solid var(--border-2); border-radius: 999px;
+  background: var(--surface); color: var(--text-2); font-size: 13px; font-weight: 550;
+}
+.ep-tab:hover { border-color: var(--text-3); color: var(--text); }
+.ep-tab.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.ep-tab .ep-dot { width: 6px; height: 6px; border-radius: 50%; background: #16a34a; }
+.ep-tab.active .ep-dot { background: var(--accent-text); }
 input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 
 /* ───────────────────────── Run bar ───────────────────────── */
@@ -425,7 +442,9 @@ code { font-family: var(--mono); background: var(--surface-3); color: var(--text
   }
   .sidebar-brand { padding: 0 8px 0 0; }
   .nav-label { display: none; }
-  .nav { flex-direction: row; flex: 1 1 100%; overflow-x: auto; gap: 4px; order: 3; }
+  .nav-section { flex: 1 1 100%; order: 3; }
+  .nav-section + .nav-section { margin-top: 0; }
+  .nav { flex-direction: row; flex: 1 1 100%; overflow-x: auto; gap: 4px; }
   .nav-item { width: auto; }
   .nav-item .nav-count { display: none; }
   .sidebar-foot { margin: 0 0 0 auto; flex-direction: row; align-items: center; padding-top: 0; }
