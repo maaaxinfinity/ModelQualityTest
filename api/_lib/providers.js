@@ -54,7 +54,7 @@ function buildAnthropic(question, cfg) {
   };
   // Stream real message generations; count_tokens is a one-shot JSON call.
   if (!isCountTokens) {
-    body.max_tokens = question.max_tokens || cfg.maxTokens || 1024;
+    body.max_tokens = question.max_tokens || cfg.maxTokens || 102400;
     body.stream = true;
   }
   if (question.temperature !== undefined) body.temperature = question.temperature;
@@ -106,6 +106,18 @@ function convertTool(tool) {
   };
 }
 
+// Sakana / Fugu rejects reasoning.effort outside ('high','xhigh','max'); the
+// Responses spec value 'medium' (and lower) is invalid there. Clamp up so the
+// same probe definitions work against both OpenAI and Sakana.
+function sakanaReasoning(reasoning) {
+  if (!reasoning || typeof reasoning !== 'object') return reasoning;
+  const allowed = new Set(['high', 'xhigh', 'max']);
+  if (reasoning.effort && !allowed.has(reasoning.effort)) {
+    return Object.assign({}, reasoning, { effort: 'high' });
+  }
+  return reasoning;
+}
+
 function buildOpenAIResponses(question, cfg, groupName) {
   const baseUrl = cfg.baseUrl || DEFAULTS[groupName].baseUrl;
   const endpoint = withV1(baseUrl, 'responses');
@@ -117,7 +129,9 @@ function buildOpenAIResponses(question, cfg, groupName) {
   if (question.system || cfg.system) body.instructions = question.system || cfg.system;
   if (question.max_tokens || cfg.maxTokens) body.max_output_tokens = question.max_tokens || cfg.maxTokens;
   if (question.temperature !== undefined) body.temperature = question.temperature;
-  if (question.reasoning) body.reasoning = question.reasoning;
+  if (question.reasoning) {
+    body.reasoning = groupName === 'Sakana' ? sakanaReasoning(question.reasoning) : question.reasoning;
+  }
   if (question.text) body.text = question.text;
   if (question.tools) body.tools = question.tools.map(convertTool);
   if (question.tool_choice) body.tool_choice = question.tool_choice;
@@ -395,7 +409,7 @@ function aggregateStream(endpointType, events) {
 
 async function fetchOnce(request, timeoutMs) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs || 120000);
+  const timer = setTimeout(() => ctl.abort(), timeoutMs || 600000);
   const t0 = Date.now();
   try {
     const resp = await fetch(request.endpoint, {

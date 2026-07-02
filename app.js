@@ -61,11 +61,53 @@
         }
       );
     },
+    // Raw text for a value, matching what highlightJson renders (minus markup).
+    jsonText(value) {
+      try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+    },
+    // A code block with a one-click copy button pinned to its top-right corner.
     jsonBlock(obj) {
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
       const pre = document.createElement('pre');
       pre.className = 'code';
       pre.innerHTML = Util.highlightJson(obj);
-      return pre;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-btn';
+      btn.textContent = '复制';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        Util.copyText(Util.jsonText(obj), btn);
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(pre);
+      return wrap;
+    },
+    // Copy text to clipboard with a brief "已复制" affordance on the trigger.
+    copyText(text, btn) {
+      const done = () => {
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
+      };
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+      } else {
+        fallback();
+      }
     },
     section(title, open, fillFn) {
       const det = document.createElement('details');
@@ -152,7 +194,7 @@
     defaultConfig(group) {
       return Object.assign({
         id: null, name: '', group,
-        maxTokens: 1024, timeout: 120000, delay: 300, system: '',
+        maxTokens: 102400, timeout: 600000, delay: 300, system: '',
         imageN: 1, imageQuality: 'medium', imageSize: '1024x1024', apiKey: ''
       }, Store.DEFAULTS[group]);
     },
@@ -223,8 +265,8 @@
       apiKey: (c.apiKey || '').trim(),
       model: (modelId || '').trim() || Store.DEFAULTS[c.group].model,
       authMode: c.authMode || 'bearer',
-      maxTokens: Number(c.maxTokens || 1024),
-      timeout: Number(c.timeout || 120000),
+      maxTokens: Number(c.maxTokens || 102400),
+      timeout: Number(c.timeout || 600000),
       delay: Number(c.delay || 0),
       system: c.system || '',
       image: {
@@ -264,8 +306,8 @@
       $cfg.baseUrl.value = cfg.baseUrl || '';
       $cfg.apiKey.value = target ? (cfg.apiKey || '') : '';
       $cfg.authMode.value = cfg.authMode || 'bearer';
-      $cfg.maxTokens.value = cfg.maxTokens || 1024;
-      $cfg.timeout.value = cfg.timeout || 120000;
+      $cfg.maxTokens.value = cfg.maxTokens || 102400;
+      $cfg.timeout.value = cfg.timeout || 600000;
       $cfg.delay.value = cfg.delay || 300;
       $cfg.system.value = cfg.system || '';
       $cfg.imageN.value = cfg.imageN || 1;
@@ -295,8 +337,8 @@
         baseUrl: $cfg.baseUrl.value.trim(),
         apiKey: $cfg.apiKey.value.trim(),
         authMode: $cfg.authMode.value,
-        maxTokens: Number($cfg.maxTokens.value || 1024),
-        timeout: Number($cfg.timeout.value || 120000),
+        maxTokens: Number($cfg.maxTokens.value || 102400),
+        timeout: Number($cfg.timeout.value || 600000),
         delay: Number($cfg.delay.value || 0),
         system: $cfg.system.value,
         imageN: Number($cfg.imageN.value || 1),
@@ -994,26 +1036,48 @@
       const grid = Cards.grid();
       grid.innerHTML = '';
       const qs = Store.questionsForGroup(Store.activeGroup);
-      const cats = new Set();
+
+      // Group questions by category so same-type probes render together in a
+      // titled section, preserving first-seen category order and in-category order.
+      const order = [];
+      const byCat = new Map();
       for (const q of qs) {
-        cats.add(q.category);
-        grid.appendChild(Cards.build(q));
+        const cat = q.category || '未分类';
+        if (!byCat.has(cat)) { byCat.set(cat, []); order.push(cat); }
+        byCat.get(cat).push(q);
       }
+
+      for (const cat of order) {
+        const items = byCat.get(cat);
+        const section = document.createElement('section');
+        section.className = 'qsection';
+        section.dataset.category = cat;
+        const head = document.createElement('div');
+        head.className = 'qsection-head';
+        head.innerHTML = `<h3 class="qsection-title">${Util.escapeHtml(cat)}</h3>` +
+          `<span class="qsection-count">${items.length}</span>`;
+        const inner = document.createElement('div');
+        inner.className = 'qgrid-inner';
+        for (const q of items) inner.appendChild(Cards.build(q));
+        section.appendChild(head);
+        section.appendChild(inner);
+        grid.appendChild(section);
+      }
+
       Util.el('q-count').textContent = String(qs.length);
       const filter = Util.el('filter-category');
       filter.innerHTML = '<option value="">全部分类</option>' +
-        [...cats].map((c) => `<option value="${Util.escapeAttr(c)}">${Util.escapeHtml(c)}</option>`).join('');
+        order.map((c) => `<option value="${Util.escapeAttr(c)}">${Util.escapeHtml(c)}</option>`).join('');
     },
 
     build(q) {
       const card = document.createElement('div');
       card.className = 'qcard';
       card.dataset.qid = q.id;
-      card.dataset.category = q.category || '';
+      card.dataset.category = q.category || '未分类';
       card.innerHTML = `
         <div class="qcard-head">
           <span class="qcard-status"></span>
-          <span class="tag subtle">${Util.escapeHtml(q.category || '')}</span>
           <span class="qcard-name">${Util.escapeHtml(q.name || q.id)}</span>
           <div class="qcard-actions">
             <button type="button" class="qcard-run">▶ 运行</button>
@@ -1173,8 +1237,9 @@
     },
     applyFilter() {
       const v = Util.el('filter-category').value;
-      Cards.all().forEach((card) => {
-        card.classList.toggle('hidden-by-filter', !!v && card.dataset.category !== v);
+      // Sections group by category, so filtering shows/hides whole sections.
+      Cards.grid().querySelectorAll('.qsection').forEach((section) => {
+        section.classList.toggle('hidden-by-filter', !!v && section.dataset.category !== v);
       });
     },
     clearResults() {

@@ -52,7 +52,7 @@ async function executeOne(question, cfg, user, batchId) {
   const groupName = normalizeGroup(question.group || cfg.group);
   const provider = String(question.provider || groupName).toLowerCase();
   const request = buildUpstreamRequest(question, cfg);
-  const response = await fetchOnce(request, Number(cfg.timeout || question.timeout || 120000));
+  const response = await fetchOnce(request, Number(cfg.timeout || question.timeout || 600000));
   const body = response.json || { raw_text: response.text };
   const cleanBody = sanitizePayload(body);
   const usage = normalizeUsage(body, groupName, question, request.body);

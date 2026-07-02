@@ -112,6 +112,13 @@ assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');
 assert.equal(sakanaRequest.body.model, 'fugu-ultra');
 assert.equal(sakanaRequest.endpointType, 'sakana_responses');
 
+// Sakana/Fugu only accepts reasoning.effort in ('high','xhigh','max'); 'medium' from
+// the Responses spec must be clamped up, while OpenAI keeps the original value.
+const sakanaReasoningReq = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'sakana-route-anthropic-thinking'), cfgFor('Sakana'));
+assert.equal(sakanaReasoningReq.body.reasoning.effort, 'high', 'Sakana medium effort must clamp to high');
+const oaiReasoningReq = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'oai-reasoning-effort'), cfgFor('OpenAI'));
+assert.equal(oaiReasoningReq.body.reasoning.effort, 'medium', 'OpenAI effort must pass through unchanged');
+
 // Streaming: every text provider streams (body.stream + request.stream); Image does not.
 const oaiReq = buildUpstreamRequest(QUESTIONS.find((q) => q.group === 'OpenAI'), cfgFor('OpenAI'));
 const antReq = buildUpstreamRequest(QUESTIONS.find((q) => q.group === 'Anthropic' && !/count_tokens/.test(q.endpoint_path || '')), cfgFor('Anthropic'));
