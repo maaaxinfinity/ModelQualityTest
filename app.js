@@ -168,15 +168,15 @@
       if (chosen.length) return chosen;
       return list.length ? [list[0].id] : [];
     },
-    // Models chosen to run for one endpoint. Defaults to all of its enabled
-    // models; always intersected with the endpoint's current enabled set so a
-    // removed model never lingers in the selection.
+    // Models chosen to run for one endpoint. Empty by default — selecting an
+    // endpoint does NOT auto-pick its models; the operator ticks them. Always
+    // intersected with the endpoint's current enabled set so a removed model
+    // never lingers in the selection.
     selectedModelIds(group, id) {
       const ep = Store.endpoint(group, id);
       const enabled = (ep && ep.enabledModels) || [];
       const map = Store.selectedModels[group] || {};
-      const chosen = (map[id] || []).filter((m) => enabled.includes(m));
-      return chosen.length ? chosen : enabled.slice();
+      return (map[id] || []).filter((m) => enabled.includes(m));
     },
     setSelectedModelIds(group, id, models) {
       if (!Store.selectedModels[group]) Store.selectedModels[group] = {};
@@ -578,6 +578,14 @@
           chip.addEventListener('click', () => Picker.toggleModel(id, m));
           row.appendChild(chip);
         }
+        if (enabled.length > 1) {
+          const all = document.createElement('button');
+          all.type = 'button';
+          all.className = 'link-btn picker-modelall';
+          all.textContent = chosen.size >= enabled.length ? '全不选' : '全选';
+          all.addEventListener('click', () => Picker.toggleAllModels(id));
+          row.appendChild(all);
+        }
         host.appendChild(row);
       }
 
@@ -603,6 +611,15 @@
       const ep = Store.endpoint(group, id);
       const ordered = ((ep && ep.enabledModels) || []).filter((m) => set.has(m));
       Store.setSelectedModelIds(group, id, ordered);
+      Picker.render();
+    },
+
+    toggleAllModels(id) {
+      const group = Store.activeGroup;
+      const ep = Store.endpoint(group, id);
+      const enabled = (ep && ep.enabledModels) || [];
+      const chosen = Store.selectedModelIds(group, id);
+      Store.setSelectedModelIds(group, id, chosen.length >= enabled.length ? [] : enabled.slice());
       Picker.render();
     }
   };
@@ -1206,8 +1223,7 @@
         }
       }
       if (!targets.length) {
-        UI.flash('请先在端点管理为所选端点配置 API Key 并启用模型', 'error');
-        Router.show('endpoints', group);
+        UI.flash('请先勾选要运行的模型', 'error');
         return null;
       }
       return targets;

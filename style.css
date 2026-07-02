@@ -365,6 +365,7 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 .pick-chip.active .pick-warn { color: #fde68a; }
 .picker-summary { font-size: 13.5px; color: var(--text-3); }
 .picker-total { margin-top: 2px; font-weight: 550; }
+.picker-modelall { margin-left: 6px; align-self: center; }
 .picker-empty { font-size: 14.5px; color: var(--text-2); }
 
 input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
