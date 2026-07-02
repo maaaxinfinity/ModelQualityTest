@@ -13,7 +13,8 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
 - The console uses a grouped sidebar: a Testing section (the five provider groups) and a Platform section (Endpoints, History, Admin).
-- Endpoint configuration is stored in PostgreSQL (globally shared); API keys are encrypted at rest. Nothing but the UI theme is kept in browser `localStorage`.
+- Each type (provider group) can hold multiple named endpoints — e.g. "官方", "代理A", "Azure" — each with its own Base URL / model / API key. Endpoint configuration is stored in PostgreSQL (globally shared); API keys are encrypted at rest. Nothing but the UI theme is kept in browser `localStorage`.
+- The test page has an endpoint picker: run cases against one endpoint, or select several to run the same cases against each and compare results side by side.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
 - TOTP setup returns an otpauth URL rendered client-side as a QR with the qrbtf bundle, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
 

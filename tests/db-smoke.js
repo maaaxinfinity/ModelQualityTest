@@ -67,33 +67,50 @@ async function main() {
   assert.equal(run.rows.length, 1);
   assert.equal(run.rows[0].cost_source, 'price_table:openai/gpt-5.5');
 
-  // Endpoint config: encrypt on write, decrypt on read, and key survives a non-key edit.
+  // Endpoint configs: multiple named endpoints per group, encrypted keys, delete, dup-name guard.
   process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'smoke-test-session-secret';
   const { encryptSecret, decryptSecret } = require('../api/_lib/secrets');
   await query('delete from endpoint_configs');
-  await query(
-    `insert into endpoint_configs (model_group, base_url, model, auth_mode, api_key_cipher, updated_by)
-     values ('OpenAI','https://api.openai.com','gpt-5.5','bearer',$1,'usr_smoke')`,
-    [encryptSecret('sk-smoke-key')]
-  );
-  let ep = await query('select * from endpoint_configs where model_group=$1', ['OpenAI']);
-  assert.equal(decryptSecret(ep.rows[0].api_key_cipher), 'sk-smoke-key');
-  assert.notEqual(ep.rows[0].api_key_cipher, 'sk-smoke-key');
 
-  // Non-key edit (cipher param null) must coalesce to the existing cipher.
+  const insertEp = (id, name, model, key) => query(
+    `insert into endpoint_configs (id, model_group, name, base_url, model, auth_mode, api_key_cipher, updated_by)
+     values ($1,'OpenAI',$2,'https://api.openai.com',$3,'bearer',$4,'usr_smoke')`,
+    [id, name, model, key == null ? null : encryptSecret(key)]
+  );
+
+  // Two endpoints under one group with distinct names + keys.
+  await insertEp('ep_official', '官方', 'gpt-5.5', 'sk-official');
+  await insertEp('ep_proxy', '代理A', 'gpt-5.5', 'sk-proxy');
+  let eps = await query('select * from endpoint_configs where model_group=$1 order by name', ['OpenAI']);
+  assert.equal(eps.rows.length, 2);
+  const byName = Object.fromEntries(eps.rows.map((r) => [r.name, r]));
+  assert.equal(decryptSecret(byName['官方'].api_key_cipher), 'sk-official');
+  assert.equal(decryptSecret(byName['代理A'].api_key_cipher), 'sk-proxy');
+  assert.notEqual(byName['官方'].api_key_cipher, 'sk-official');
+
+  // unique(model_group, name) guard rejects a duplicate name.
+  await assert.rejects(() => insertEp('ep_dup', '官方', 'gpt-5.5', 'sk-x'), /duplicate|unique/i);
+
+  // Non-key edit (cipher null) coalesces to the existing cipher.
   await query(
-    `insert into endpoint_configs (model_group, base_url, model, auth_mode, api_key_cipher, updated_by)
-     values ('OpenAI','https://api.openai.com','gpt-5.5-pro','bearer',$1,'usr_smoke')
-     on conflict (model_group) do update set
+    `insert into endpoint_configs (id, model_group, name, base_url, model, auth_mode, api_key_cipher, updated_by)
+     values ('ep_official','OpenAI','官方','https://api.openai.com','gpt-5.5-pro','bearer',$1,'usr_smoke')
+     on conflict (id) do update set
        model = excluded.model,
        api_key_cipher = coalesce(excluded.api_key_cipher, endpoint_configs.api_key_cipher)`,
     [null]
   );
-  ep = await query('select * from endpoint_configs where model_group=$1', ['OpenAI']);
-  assert.equal(ep.rows[0].model, 'gpt-5.5-pro');
-  assert.equal(decryptSecret(ep.rows[0].api_key_cipher), 'sk-smoke-key');
+  let official = await query("select * from endpoint_configs where id='ep_official'");
+  assert.equal(official.rows[0].model, 'gpt-5.5-pro');
+  assert.equal(decryptSecret(official.rows[0].api_key_cipher), 'sk-official');
 
-  console.log(JSON.stringify({ ok: true, prices: priceCount.rows[0].n, run: run.rows[0].id }));
+  // Delete one endpoint; the other and its key survive.
+  await query("delete from endpoint_configs where id='ep_proxy'");
+  eps = await query('select * from endpoint_configs where model_group=$1', ['OpenAI']);
+  assert.equal(eps.rows.length, 1);
+  assert.equal(decryptSecret(eps.rows[0].api_key_cipher), 'sk-official');
+
+  console.log(JSON.stringify({ ok: true, prices: priceCount.rows[0].n, run: run.rows[0].id, endpoints: eps.rows.length }));
 }
 
 main().catch((err) => {

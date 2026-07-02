@@ -78,7 +78,9 @@ create index if not exists model_prices_synced_at_idx on model_prices(synced_at 
 create index if not exists auth_enrollments_user_mode_idx on auth_enrollments(user_id, mode, created_at desc);
 
 create table if not exists endpoint_configs (
-  model_group text primary key,
+  id text primary key,
+  model_group text not null,
+  name text not null,
   base_url text,
   model text,
   auth_mode text,
@@ -91,5 +93,7 @@ create table if not exists endpoint_configs (
   image_size text,
   api_key_cipher text,
   updated_by text references app_users(id),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (model_group, name)
 );
+create index if not exists endpoint_configs_group_idx on endpoint_configs(model_group);

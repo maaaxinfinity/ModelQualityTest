@@ -125,7 +125,9 @@
     activeGroup: 'OpenAI',
     activeView: 'test',     // test | endpoints | history | admin
     editingGroup: 'OpenAI', // group currently shown in the Endpoints editor
-    configs: {},            // group -> config loaded from the database
+    editingId: null,        // endpoint id loaded in the editor; null = new endpoint
+    configs: {},            // group -> array of endpoints loaded from the database
+    selected: {},           // group -> array of selected endpoint ids (for the next run)
     sessionUser: null,
     resultsById: new Map(),
     inflight: new Set(),
@@ -134,12 +136,23 @@
 
     defaultConfig(group) {
       return Object.assign({
+        id: null, name: '', group,
         maxTokens: 1024, timeout: 120000, delay: 300, system: '',
         imageN: 1, imageQuality: 'medium', imageSize: '1024x1024', apiKey: ''
       }, Store.DEFAULTS[group]);
     },
-    configFor(group) {
-      return Object.assign(Store.defaultConfig(group), Store.configs[group] || {});
+    list(group) {
+      return Store.configs[group] || [];
+    },
+    endpoint(group, id) {
+      return Store.list(group).find((e) => e.id === id) || null;
+    },
+    // The endpoint ids currently selected to run for a group (defaults to first).
+    selectedIds(group) {
+      const list = Store.list(group);
+      const chosen = (Store.selected[group] || []).filter((id) => list.some((e) => e.id === id));
+      if (chosen.length) return chosen;
+      return list.length ? [list[0].id] : [];
     },
     questionsForGroup(group) {
       return window.QUESTIONS.filter((q) => q.group === group);
@@ -169,31 +182,34 @@
     };
   }
 
-  /* ───────────────────────── Config (DB-backed) ───────────────────────── */
+  /* ───────────────────────── Config (DB-backed, many-per-group) ───────────────────────── */
   const Config = {
-    // Load every group's config from the database into Store.configs.
+    // Load every group's endpoint list from the database into Store.configs.
     async loadAll() {
       try {
         const data = await Api.call('/api/admin/endpoints', { method: 'GET', headers: {} });
         const byGroup = data.configs || {};
         Store.configs = {};
         for (const group of Store.GROUPS) {
-          Store.configs[group] = Object.assign(Store.defaultConfig(group), byGroup[group] || { group });
-          Store.configs[group].group = group;
+          Store.configs[group] = (byGroup[group] || []).map((e) => Object.assign(Store.defaultConfig(group), e, { group }));
         }
       } catch (e) {
-        // No session yet, or transient failure — fall back to defaults so the UI still works.
+        // No session yet, or transient failure — empty lists so the UI still works.
         Store.configs = {};
-        for (const group of Store.GROUPS) Store.configs[group] = Store.defaultConfig(group);
+        for (const group of Store.GROUPS) Store.configs[group] = [];
       }
     },
 
-    // Populate the Endpoints form from Store.configs for the editing group.
-    fill(group) {
+    // Populate the Endpoints editor. id=null → blank "new endpoint" form.
+    fill(group, id) {
       Store.editingGroup = group;
-      const cfg = Store.configFor(group);
+      const list = Store.list(group);
+      const target = id ? Store.endpoint(group, id) : null;
+      const cfg = target || Store.defaultConfig(group);
+      Store.editingId = target ? target.id : null;
+      $cfg.name.value = target ? cfg.name : '';
       $cfg.baseUrl.value = cfg.baseUrl || '';
-      $cfg.apiKey.value = cfg.apiKey || '';
+      $cfg.apiKey.value = target ? (cfg.apiKey || '') : '';
       $cfg.model.value = cfg.model || '';
       $cfg.authMode.value = cfg.authMode || 'bearer';
       $cfg.maxTokens.value = cfg.maxTokens || 1024;
@@ -204,14 +220,19 @@
       $cfg.imageQuality.value = cfg.imageQuality || 'medium';
       $cfg.imageSize.value = cfg.imageSize || '1024x1024';
       Util.el('view-endpoints').classList.toggle('is-image', group === 'Image');
+      Util.el('delete-endpoint').hidden = !Store.editingId;
       Config.buildTabs();
+      Config.buildEndpointList();
       Config.summary();
+      Util.el('endpoints-output').innerHTML = list.length ? '' :
+        '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击保存以创建。</div>';
     },
 
-    // Read the Endpoints form into a config object for the editing group.
     readForm() {
       return {
+        id: Store.editingId || undefined,
         group: Store.editingGroup,
+        name: $cfg.name.value.trim(),
         baseUrl: $cfg.baseUrl.value.trim(),
         apiKey: $cfg.apiKey.value.trim(),
         model: $cfg.model.value.trim(),
@@ -229,35 +250,79 @@
     async save() {
       const out = Util.el('endpoints-output');
       const form = Config.readForm();
+      if (!form.name) { out.innerHTML = '<div class="warn-box">请填写端点名称。</div>'; return; }
       try {
         const data = await Api.call('/api/admin/endpoints', { method: 'POST', body: JSON.stringify(form) });
-        Store.configs[form.group] = Object.assign(Store.defaultConfig(form.group), data.config, { group: form.group });
-        Config.fill(form.group);
-        out.innerHTML = `<div class="ok-box">已保存 ${Util.escapeHtml(form.group)} 端点配置。</div>`;
+        await Config.loadAll();
+        Config.fill(form.group, data.config.id);
+        out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」。</div>`;
       } catch (e) {
         out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(e.message)}</div>`;
       }
     },
 
+    async remove() {
+      if (!Store.editingId) return;
+      const out = Util.el('endpoints-output');
+      const group = Store.editingGroup;
+      try {
+        await Api.call(`/api/admin/endpoints?id=${encodeURIComponent(Store.editingId)}`, { method: 'DELETE', headers: {} });
+        // Drop it from the selection too.
+        Store.selected[group] = (Store.selected[group] || []).filter((id) => id !== Store.editingId);
+        await Config.loadAll();
+        const next = Store.list(group)[0];
+        Config.fill(group, next ? next.id : null);
+        out.innerHTML = '<div class="ok-box">端点已删除。</div>';
+      } catch (e) {
+        out.innerHTML = `<div class="warn-box">删除失败：${Util.escapeHtml(e.message)}</div>`;
+      }
+    },
+
+    // Type tabs (OpenAI / Anthropic / …) — switching resets to that group's first endpoint.
     buildTabs() {
       const host = Util.el('ep-group-tabs');
       if (!host) return;
       host.innerHTML = '';
       for (const group of Store.GROUPS) {
-        const cfg = Store.configs[group] || {};
+        const list = Store.list(group);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'ep-tab' + (group === Store.editingGroup ? ' active' : '');
         btn.textContent = group;
-        if (cfg.hasApiKey || cfg.apiKey) {
+        const count = document.createElement('span');
+        count.className = 'ep-badge';
+        count.textContent = String(list.length);
+        btn.appendChild(count);
+        btn.addEventListener('click', () => Config.fill(group, (Store.list(group)[0] || {}).id || null));
+        host.appendChild(btn);
+      }
+    },
+
+    // Endpoint chips for the editing group + a "new endpoint" chip.
+    buildEndpointList() {
+      const host = Util.el('ep-endpoint-list');
+      if (!host) return;
+      host.innerHTML = '';
+      for (const ep of Store.list(Store.editingGroup)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ep-chip' + (ep.id === Store.editingId ? ' active' : '');
+        btn.textContent = ep.name || '(未命名)';
+        if (ep.hasApiKey || ep.apiKey) {
           const dot = document.createElement('span');
           dot.className = 'ep-dot';
           dot.title = '已配置 API Key';
           btn.appendChild(dot);
         }
-        btn.addEventListener('click', () => Config.fill(group));
+        btn.addEventListener('click', () => Config.fill(Store.editingGroup, ep.id));
         host.appendChild(btn);
       }
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'ep-chip ep-new' + (Store.editingId ? '' : ' active');
+      add.textContent = '＋ 新建端点';
+      add.addEventListener('click', () => Config.fill(Store.editingGroup, null));
+      host.appendChild(add);
     },
 
     summary() {
@@ -265,7 +330,63 @@
       if (!node) return;
       let host = '';
       try { host = new URL($cfg.baseUrl.value).host; } catch (e) { host = ''; }
-      node.textContent = `· ${Store.editingGroup} · ${$cfg.model.value || ''}${host ? ' @ ' + host : ''}`;
+      const label = Store.editingId ? ($cfg.name.value || '端点') : '新建端点';
+      node.textContent = `· ${Store.editingGroup} · ${label}${host ? ' @ ' + host : ''}`;
+    }
+  };
+
+  /* ───────────────────────── Endpoint picker (test page) ───────────────────────── */
+  const Picker = {
+    // Multi-select strip on the test page: which endpoints the next run targets.
+    render() {
+      const host = Util.el('endpoint-picker');
+      if (!host) return;
+      const group = Store.activeGroup;
+      const list = Store.list(group);
+      host.innerHTML = '';
+
+      if (!list.length) {
+        host.innerHTML = `<div class="picker-empty">该分组还没有端点。<button type="button" class="auth-link" id="picker-goto-ep">前往端点管理</button></div>`;
+        Util.el('picker-goto-ep').addEventListener('click', () => Router.show('endpoints', group));
+        return;
+      }
+
+      const selected = new Set(Store.selectedIds(group));
+      Store.selected[group] = [...selected];
+
+      const label = document.createElement('span');
+      label.className = 'picker-label';
+      label.textContent = '端点';
+      host.appendChild(label);
+
+      for (const ep of list) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pick-chip' + (selected.has(ep.id) ? ' active' : '');
+        btn.textContent = ep.name || '(未命名)';
+        if (!(ep.hasApiKey || ep.apiKey)) {
+          const warn = document.createElement('span');
+          warn.className = 'pick-warn';
+          warn.title = '未配置 API Key';
+          warn.textContent = '⚠';
+          btn.appendChild(warn);
+        }
+        btn.addEventListener('click', () => Picker.toggle(ep.id));
+        host.appendChild(btn);
+      }
+
+      const summary = document.createElement('span');
+      summary.className = 'picker-summary';
+      summary.textContent = `已选 ${selected.size} / ${list.length}`;
+      host.appendChild(summary);
+    },
+
+    toggle(id) {
+      const group = Store.activeGroup;
+      const set = new Set(Store.selectedIds(group));
+      if (set.has(id)) set.delete(id); else set.add(id);
+      Store.selected[group] = [...set];
+      Picker.render();
     }
   };
 
@@ -335,7 +456,10 @@
           Auth.sessionPanel(`<div class="warn-box">SESSION_SECRET 使用了不安全的默认值，请在部署环境配置强随机密钥。</div>`);
         }
         // Endpoint config lives in the database; load it once authenticated.
-        Config.loadAll().then(() => { if (Store.activeView === 'endpoints') Config.fill(Store.editingGroup); });
+        Config.loadAll().then(() => {
+          Picker.render();
+          if (Store.activeView === 'endpoints') Config.fill(Store.editingGroup, (Store.list(Store.editingGroup)[0] || {}).id || null);
+        });
         return;
       }
 
@@ -702,21 +826,18 @@
       btn.innerHTML = busy ? '<span class="busy-spinner"></span>运行中' : '▶ 运行';
     },
 
-    renderResult(card, result) {
-      card.classList.remove('ok', 'fail');
-      card.classList.add(result.ok ? 'ok' : 'fail', 'has-result');
-      const meta = card.querySelector('.qcard-meta-row');
-      meta.innerHTML = [
+    badgeRow(result) {
+      return [
         Util.badge(result.ok ? 'OK' : 'FAIL', result.ok ? 'ok' : 'fail'),
         result.response_status ? Util.badge(`HTTP ${result.response_status}`) : '',
         (result.routed_model_id || result.model_id) ? Util.badge(`model=${Util.escapeHtml(result.routed_model_id || result.model_id)}`) : '',
         result.elapsed_ms != null ? Util.badge(`${result.elapsed_ms} ms`) : '',
         result.estimated_cost_usd != null ? Util.badge(`$${Util.formatCost(result.estimated_cost_usd)}`, 'info') : ''
       ].filter(Boolean).join('');
+    },
 
-      Cards.ensureBody(card);
-      const host = card.querySelector('.qcard-result');
-      host.innerHTML = '';
+    // Build the detail sections (Summary/Response/Request/Headers) for one result into a host.
+    fillResultSections(host, result) {
       if (result.error_message) {
         const div = document.createElement('div');
         div.className = 'warn-box';
@@ -743,6 +864,47 @@
       host.appendChild(Util.section('Response', false, (inner) => inner.appendChild(Util.jsonBlock(result.response_body || {}))));
       host.appendChild(Util.section('Request', false, (inner) => inner.appendChild(Util.jsonBlock(result.request_body || {}))));
       host.appendChild(Util.section('Headers', false, (inner) => inner.appendChild(Util.jsonBlock(result.response_headers || {}))));
+    },
+
+    // Render one or more endpoint results into a card. list = [{endpoint, result}].
+    renderResults(card, list) {
+      const anyFail = list.some((x) => !x.result.ok);
+      card.classList.remove('ok', 'fail');
+      card.classList.add(anyFail ? 'fail' : 'ok', 'has-result');
+
+      // Card-level meta = aggregate across endpoints.
+      const meta = card.querySelector('.qcard-meta-row');
+      if (list.length === 1) {
+        meta.innerHTML = Cards.badgeRow(list[0].result);
+      } else {
+        const okN = list.filter((x) => x.result.ok).length;
+        const cost = list.reduce((s, x) => s + Number(x.result.estimated_cost_usd || 0), 0);
+        meta.innerHTML = [
+          Util.badge(`${okN}/${list.length} OK`, anyFail ? 'fail' : 'ok'),
+          Util.badge(`${list.length} 端点`),
+          cost ? Util.badge(`$${Util.formatCost(cost)}`, 'info') : ''
+        ].filter(Boolean).join('');
+      }
+
+      Cards.ensureBody(card);
+      const host = card.querySelector('.qcard-result');
+      host.innerHTML = '';
+      host.classList.toggle('multi', list.length > 1);
+
+      for (const { endpoint, result } of list) {
+        const panel = document.createElement('div');
+        panel.className = 'result-endpoint ' + (result.ok ? 'ok' : 'fail');
+        const head = document.createElement('div');
+        head.className = 'result-ep-head';
+        head.innerHTML = `<span class="result-ep-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>
+          <span class="result-ep-badges">${Cards.badgeRow(result)}</span>`;
+        panel.appendChild(head);
+        const body = document.createElement('div');
+        body.className = 'result-ep-body';
+        Cards.fillResultSections(body, result);
+        panel.appendChild(body);
+        host.appendChild(panel);
+      }
     },
 
     isHiddenByFilter(q) {
@@ -809,43 +971,81 @@
 
   /* ───────────────────────── Runner ───────────────────────── */
   const Runner = {
+    // Resolve the selected endpoints for the active group into {endpoint, cfg}[].
+    // Endpoints missing an API key are dropped (with a warning) so a run never
+    // sends an empty key. Returns null (and redirects) if nothing is runnable.
+    selectedTargets() {
+      const group = Store.activeGroup;
+      const ids = Store.selectedIds(group);
+      const targets = ids
+        .map((id) => Store.endpoint(group, id))
+        .filter(Boolean)
+        .map((ep) => ({ endpoint: ep, cfg: cfgToRunPayload(ep) }))
+        .filter((t) => t.cfg.apiKey);
+      if (!targets.length) {
+        UI.flash('请先在端点管理为所选端点配置 API Key', 'error');
+        Router.show('endpoints', group);
+        return null;
+      }
+      return targets;
+    },
+
+    // Run one question across every selected endpoint and render them side-by-side.
     async runOne(q, card) {
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const cfg = cfgToRunPayload(Store.configFor(Store.activeGroup));
-      if (!cfg.apiKey) { UI.flash('请先在端点管理配置 API Key', 'error'); return Router.show('endpoints', Store.activeGroup); }
+      const targets = Runner.selectedTargets();
+      if (!targets) return;
       Store.stopFlag = false;
       Cards.setBusy(card, true);
       Cards.toggle(card, true);
-      const controller = new AbortController();
-      Store.inflight.add(controller);
       UI.refreshControls();
+      const batchId = Util.makeBatchId();
       try {
         UI.flash(`运行中 · ${q.name}`, 'running');
-        const data = await Api.runTest({ question: q, cfg, batchId: Util.makeBatchId() }, controller.signal);
-        Store.resultsById.set(q.id, data.result);
-        Cards.renderResult(card, data.result);
-        UI.flash(data.result.ok ? `完成 · ${q.name}` : `失败 · ${q.name}`, data.result.ok ? 'done' : 'error');
-      } catch (e) {
-        Cards.renderResult(card, { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group });
-        UI.flash(`失败 · ${e.message}`, 'error');
+        const list = await Runner.runAcross(q, targets, batchId);
+        Cards.renderResults(card, list);
+        const okAll = list.every((x) => x.result.ok);
+        UI.flash(okAll ? `完成 · ${q.name}` : `失败 · ${q.name}`, okAll ? 'done' : 'error');
       } finally {
-        Store.inflight.delete(controller);
         Cards.setBusy(card, false);
         UI.refreshControls();
       }
     },
 
+    // Run a single question against all targets; store + return [{endpoint, result}].
+    async runAcross(q, targets, batchId) {
+      const list = [];
+      for (const { endpoint, cfg } of targets) {
+        if (Store.stopFlag) break;
+        const controller = new AbortController();
+        Store.inflight.add(controller);
+        let result;
+        try {
+          const data = await Api.runTest({ question: q, cfg, batchId }, controller.signal);
+          result = data.result;
+        } catch (e) {
+          result = { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group };
+        } finally {
+          Store.inflight.delete(controller);
+        }
+        list.push({ endpoint, result });
+        Store.resultsById.set(`${q.id}::${endpoint.id}`, Object.assign({ endpoint_name: endpoint.name }, result));
+        if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
+      }
+      return list;
+    },
+
     async runGroup() {
       if (Store.batchRunning) return;
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const cfg = cfgToRunPayload(Store.configFor(Store.activeGroup));
-      if (!cfg.apiKey) { UI.flash('请先在端点管理配置 API Key', 'error'); return Router.show('endpoints', Store.activeGroup); }
+      const targets = Runner.selectedTargets();
+      if (!targets) return;
       Store.stopFlag = false;
       Store.batchRunning = true;
       UI.refreshControls();
 
       const qs = Store.questionsForGroup(Store.activeGroup).filter((q) => !Cards.isHiddenByFilter(q));
-      const total = qs.length;
+      const total = qs.length * targets.length; // question × endpoint pairs
       let next = 0, done = 0;
       const concurrency = Math.max(1, Math.min(20, Number(Util.el('opt-concurrency').value || 1)));
       const collapseAfter = Util.el('opt-collapse-after').checked;
@@ -862,27 +1062,34 @@
           Cards.setBusy(card, true);
           Cards.toggle(card, true);
           UI.flash(`${done}/${total} · ${q.name}`, 'running');
-          const controller = new AbortController();
-          Store.inflight.add(controller);
-          try {
-            const data = await Api.runTest({ question: q, cfg, batchId }, controller.signal);
-            Store.resultsById.set(q.id, data.result);
-            Cards.renderResult(card, data.result);
-            if (collapseAfter && data.result.ok) Cards.toggle(card, false);
-          } catch (e) {
-            Cards.renderResult(card, { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group });
-          } finally {
-            Store.inflight.delete(controller);
-            Cards.setBusy(card, false);
-            done++;
-            UI.flash(`${done}/${total}`, 'running');
-            UI.progress(done, total);
+          const list = [];
+          for (const { endpoint, cfg } of targets) {
+            if (Store.stopFlag) break;
+            const controller = new AbortController();
+            Store.inflight.add(controller);
+            let result;
+            try {
+              const data = await Api.runTest({ question: q, cfg, batchId }, controller.signal);
+              result = data.result;
+            } catch (e) {
+              result = { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group };
+            } finally {
+              Store.inflight.delete(controller);
+              done++;
+              UI.flash(`${done}/${total}`, 'running');
+              UI.progress(done, total);
+            }
+            list.push({ endpoint, result });
+            Store.resultsById.set(`${q.id}::${endpoint.id}`, Object.assign({ endpoint_name: endpoint.name }, result));
             if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
           }
+          Cards.renderResults(card, list);
+          if (collapseAfter && list.every((x) => x.result.ok)) Cards.toggle(card, false);
+          Cards.setBusy(card, false);
         }
       };
 
-      await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker));
+      await Promise.all(Array.from({ length: Math.min(concurrency, qs.length) }, worker));
       Store.batchRunning = false;
       UI.refreshControls();
       UI.flash(Store.stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, Store.stopFlag ? 'error' : 'done');
@@ -938,7 +1145,8 @@
         if (desc) desc.textContent = meta.desc || '';
       }
 
-      if (view === 'endpoints') Config.fill(group || Store.editingGroup);
+      if (view === 'test') Picker.render();
+      if (view === 'endpoints') Config.fill(group || Store.editingGroup, (Store.list(group || Store.editingGroup)[0] || {}).id || null);
       if (view === 'history') Admin.refreshLogs();
     }
   };
@@ -966,6 +1174,7 @@
     if (title) title.textContent = group;
     if (desc) desc.textContent = Store.GROUP_DESC[group] || '';
     Cards.renderList();
+    Picker.render();
     Router.show('test');
     if (!silent) UI.flash(group, 'done');
   }
@@ -980,6 +1189,7 @@
     }
 
     $cfg = {
+      name: Util.el('cfg-name'),
       baseUrl: Util.el('cfg-baseUrl'),
       apiKey: Util.el('cfg-apiKey'),
       model: Util.el('cfg-model'),
@@ -1017,6 +1227,8 @@
 
     // Endpoints page
     Util.el('save-endpoint').addEventListener('click', Config.save);
+    Util.el('delete-endpoint').addEventListener('click', Config.remove);
+    $cfg.name.addEventListener('input', Config.summary);
     $cfg.baseUrl.addEventListener('input', Config.summary);
     $cfg.model.addEventListener('input', Config.summary);
 

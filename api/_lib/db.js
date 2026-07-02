@@ -124,7 +124,9 @@ async function ensureSchema() {
       create index if not exists model_prices_synced_at_idx on model_prices(synced_at desc);
 
       create table if not exists endpoint_configs (
-        model_group text primary key,
+        id text primary key,
+        model_group text not null,
+        name text not null,
         base_url text,
         model text,
         auth_mode text,
@@ -137,8 +139,30 @@ async function ensureSchema() {
         image_size text,
         api_key_cipher text,
         updated_by text references app_users(id),
-        updated_at timestamptz not null default now()
+        updated_at timestamptz not null default now(),
+        unique (model_group, name)
       );
+      create index if not exists endpoint_configs_group_idx on endpoint_configs(model_group);
+    `);
+    // Migrate the original one-row-per-group shape (model_group PRIMARY KEY) to
+    // many-per-group (id PRIMARY KEY, named endpoints). No-op on a fresh DB.
+    await query('alter table endpoint_configs add column if not exists id text');
+    await query('alter table endpoint_configs add column if not exists name text');
+    await query("update endpoint_configs set id = 'ep_' || model_group where id is null");
+    await query("update endpoint_configs set name = '默认' where name is null");
+    await query(`
+      do $$ begin
+        if exists (
+          select 1 from information_schema.table_constraints tc
+          join information_schema.key_column_usage kcu on tc.constraint_name = kcu.constraint_name
+          where tc.table_name = 'endpoint_configs' and tc.constraint_type = 'PRIMARY KEY'
+            and kcu.column_name = 'model_group'
+        ) then
+          alter table endpoint_configs drop constraint endpoint_configs_pkey;
+          alter table endpoint_configs add primary key (id);
+          alter table endpoint_configs add constraint endpoint_configs_group_name_key unique (model_group, name);
+        end if;
+      end $$;
     `);
     await query('alter table app_users add column if not exists last_totp_counter bigint');
     await query('alter table auth_enrollments add column if not exists user_id text references app_users(id)');
