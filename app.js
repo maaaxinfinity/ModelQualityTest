@@ -144,6 +144,7 @@
     selectedModels: {},     // group -> { endpointId -> [modelId] } chosen for the next run
     sessionUser: null,
     resultsById: new Map(),
+    verdictById: new Map(),  // result key -> 'pass' | 'fail' (manual mark; ephemeral)
     inflight: new Set(),
     stopFlag: false,
     batchRunning: false,
@@ -184,6 +185,30 @@
     },
     questionsForGroup(group) {
       return window.QUESTIONS.filter((q) => q.group === group);
+    },
+    // Stable key for one (question × endpoint × model) result.
+    resultKey(qid, endpointId, model) {
+      return `${qid}::${endpointId}::${model}`;
+    },
+    getVerdict(key) {
+      return Store.verdictById.get(key) || null;
+    },
+    setVerdict(key, v) {
+      if (v) Store.verdictById.set(key, v);
+      else Store.verdictById.delete(key);
+    },
+    // Aggregate a card's manual verdict from its per-result marks:
+    // any fail → 'fail'; else if there are marks and all pass → 'pass'; else null.
+    cardVerdict(qid) {
+      const prefix = `${qid}::`;
+      let marks = 0, fails = 0;
+      for (const [key, v] of Store.verdictById) {
+        if (!key.startsWith(prefix)) continue;
+        marks++;
+        if (v === 'fail') fails++;
+      }
+      if (fails) return 'fail';
+      return marks ? 'pass' : null;
     }
   };
 
@@ -988,51 +1013,24 @@
       card.innerHTML = `
         <div class="qcard-head">
           <span class="qcard-status"></span>
-          <span class="tag">${Util.escapeHtml(q.group)}</span>
           <span class="tag subtle">${Util.escapeHtml(q.category || '')}</span>
           <span class="qcard-name">${Util.escapeHtml(q.name || q.id)}</span>
           <div class="qcard-actions">
             <button type="button" class="qcard-run">▶ 运行</button>
-            <button type="button" class="qcard-expand" aria-label="展开">▾</button>
+            <button type="button" class="qcard-details" aria-label="详情">详情</button>
           </div>
         </div>
         ${q.description ? `<div class="qcard-desc">${Util.escapeHtml(q.description)}</div>` : ''}
+        ${q.observe ? `<div class="qcard-observe"><span class="observe-tag">观察点</span>${Util.escapeHtml(q.observe)}</div>` : ''}
         <div class="qcard-meta-row"></div>
-        <div class="qcard-body"></div>`;
-      card.querySelector('.qcard-head').addEventListener('click', (e) => {
-        if (!e.target.closest('button')) Cards.toggle(card);
-      });
-      card.querySelector('.qcard-expand').addEventListener('click', (e) => {
-        e.stopPropagation(); Cards.toggle(card);
+        <div class="qcard-result"></div>`;
+      card.querySelector('.qcard-details').addEventListener('click', (e) => {
+        e.stopPropagation(); Drawer.open(card);
       });
       card.querySelector('.qcard-run').addEventListener('click', (e) => {
         e.stopPropagation(); Runner.runOne(q, card);
       });
       return card;
-    },
-
-    ensureBody(card) {
-      const body = card.querySelector('.qcard-body');
-      if (body.dataset.ready === '1') return;
-      const q = window.QUESTIONS.find((item) => item.id === card.dataset.qid);
-      body.appendChild(Util.section('Prompt', true, (inner) => {
-        const box = document.createElement('div');
-        box.className = 'userprompt-box';
-        box.textContent = Cards.preview(q);
-        inner.appendChild(box);
-      }));
-      if (q && q.observe) {
-        body.appendChild(Util.section('观察点 Observe', false, (inner) => {
-          const box = document.createElement('div');
-          box.className = 'userprompt-box';
-          box.textContent = q.observe;
-          inner.appendChild(box);
-        }));
-      }
-      const result = document.createElement('div');
-      result.className = 'qcard-result';
-      body.appendChild(result);
-      body.dataset.ready = '1';
     },
 
     preview(q) {
@@ -1043,13 +1041,6 @@
         return q.messages.map((m) => `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('\n');
       }
       return '(empty)';
-    },
-
-    toggle(card, force) {
-      const open = force === true ? true : force === false ? false : !card.classList.contains('expanded');
-      card.classList.toggle('expanded', open);
-      card.querySelector('.qcard-expand').textContent = open ? '▴' : '▾';
-      if (open) Cards.ensureBody(card);
     },
 
     setBusy(card, busy) {
@@ -1100,13 +1091,21 @@
       host.appendChild(Util.section('Headers', false, (inner) => inner.appendChild(Util.jsonBlock(result.response_headers || {}))));
     },
 
-    // Render one or more endpoint results into a card. list = [{endpoint, result}].
+    // Reflect a card's aggregate manual verdict (pass/fail) as an accent class.
+    applyCardVerdict(card) {
+      const v = Store.cardVerdict(card.dataset.qid);
+      card.classList.toggle('verdict-pass', v === 'pass');
+      card.classList.toggle('verdict-fail', v === 'fail');
+    },
+
+    // Render one or more results into a card as compact rows + manual verdict.
+    // list = [{endpoint, model, result}].
     renderResults(card, list) {
       const anyFail = list.some((x) => !x.result.ok);
       card.classList.remove('ok', 'fail');
       card.classList.add(anyFail ? 'fail' : 'ok', 'has-result');
 
-      // Card-level meta = aggregate across endpoints.
+      // Card-level meta = transport aggregate across endpoints.
       const meta = card.querySelector('.qcard-meta-row');
       if (list.length === 1) {
         meta.innerHTML = Cards.badgeRow(list[0].result);
@@ -1120,26 +1119,52 @@
         ].filter(Boolean).join('');
       }
 
-      Cards.ensureBody(card);
       const host = card.querySelector('.qcard-result');
       host.innerHTML = '';
-      host.classList.toggle('multi', list.length > 1);
 
       for (const { endpoint, model, result } of list) {
-        const panel = document.createElement('div');
-        panel.className = 'result-endpoint ' + (result.ok ? 'ok' : 'fail');
-        const head = document.createElement('div');
-        head.className = 'result-ep-head';
-        const modelTag = model ? `<span class="result-ep-model">${Util.escapeHtml(model)}</span>` : '';
-        head.innerHTML = `<span class="result-ep-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}
-          <span class="result-ep-badges">${Cards.badgeRow(result)}</span>`;
-        panel.appendChild(head);
-        const body = document.createElement('div');
-        body.className = 'result-ep-body';
-        Cards.fillResultSections(body, result);
-        panel.appendChild(body);
-        host.appendChild(panel);
+        const key = Store.resultKey(card.dataset.qid, endpoint.id, model);
+        const row = document.createElement('div');
+        row.className = 'result-row ' + (result.ok ? 'ok' : 'fail');
+        const modelTag = model ? `<span class="result-row-model">${Util.escapeHtml(model)}</span>` : '';
+        row.innerHTML =
+          `<div class="result-row-head">
+             <span class="result-row-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}
+             <span class="result-row-badges">${Cards.badgeRow(result)}</span>
+             <button type="button" class="result-row-details link-btn">详情</button>
+           </div>`;
+        row.appendChild(Cards.verdictControls(key, card));
+        row.querySelector('.result-row-details').addEventListener('click', (e) => {
+          e.stopPropagation(); Drawer.open(card, key);
+        });
+        host.appendChild(row);
       }
+      Cards.applyCardVerdict(card);
+    },
+
+    // Manual 通过 / 失败 / 清除 controls for one result key.
+    verdictControls(key, card) {
+      const wrap = document.createElement('div');
+      wrap.className = 'verdict';
+      const cur = Store.getVerdict(key);
+      const mk = (label, v, cls) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'verdict-btn ' + cls + (cur === v ? ' active' : '');
+        b.textContent = label;
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const next = Store.getVerdict(key) === v ? null : v;
+          Store.setVerdict(key, next);
+          wrap.querySelectorAll('.verdict-btn').forEach((btn) => btn.classList.remove('active'));
+          if (next) b.classList.add('active');
+          Cards.applyCardVerdict(card);
+        });
+        return b;
+      };
+      wrap.appendChild(mk('✓ 通过', 'pass', 'pass'));
+      wrap.appendChild(mk('✕ 失败', 'fail', 'fail'));
+      return wrap;
     },
 
     isHiddenByFilter(q) {
@@ -1154,14 +1179,85 @@
     },
     clearResults() {
       Store.resultsById.clear();
+      Store.verdictById.clear();
       Cards.all().forEach((card) => {
-        card.classList.remove('ok', 'fail', 'busy', 'has-result');
+        card.classList.remove('ok', 'fail', 'busy', 'has-result', 'verdict-pass', 'verdict-fail');
         const meta = card.querySelector('.qcard-meta-row');
         if (meta) meta.innerHTML = '';
         const result = card.querySelector('.qcard-result');
         if (result) result.innerHTML = '';
       });
+      if (Drawer.isOpen()) Drawer.close();
       UI.flash('已清空', 'done');
+    }
+  };
+
+  /* ───────────────────────── Drawer (right-side detail panel) ───────────────────────── */
+  const Drawer = {
+    isOpen() { return document.body.classList.contains('drawer-open'); },
+
+    close() {
+      document.body.classList.remove('drawer-open');
+    },
+
+    // Fill the drawer with a question's Prompt + Observe + full per-result detail
+    // sections, then slide it in. focusKey scrolls to a specific result.
+    open(card, focusKey) {
+      const qid = card.dataset.qid;
+      const q = window.QUESTIONS.find((item) => item.id === qid);
+      if (!q) return;
+      const title = Util.el('drawer-title');
+      const bodyHost = Util.el('drawer-body');
+      title.textContent = q.name || q.id;
+      bodyHost.innerHTML = '';
+
+      // Prompt.
+      bodyHost.appendChild(Util.section('Prompt', true, (inner) => {
+        const box = document.createElement('div');
+        box.className = 'userprompt-box';
+        box.textContent = Cards.preview(q);
+        inner.appendChild(box);
+      }));
+      // Observation point.
+      if (q.observe) {
+        bodyHost.appendChild(Util.section('观察点 Observe', true, (inner) => {
+          const box = document.createElement('div');
+          box.className = 'userprompt-box';
+          box.textContent = q.observe;
+          inner.appendChild(box);
+        }));
+      }
+
+      // Per-result detail panels (drawn from stored results).
+      let focusEl = null;
+      const prefix = `${qid}::`;
+      for (const [key, result] of Store.resultsById) {
+        if (!key.startsWith(prefix)) continue;
+        const panel = document.createElement('div');
+        panel.className = 'result-endpoint ' + (result.ok ? 'ok' : 'fail');
+        const head = document.createElement('div');
+        head.className = 'result-ep-head';
+        const modelTag = result.model_id ? `<span class="result-ep-model">${Util.escapeHtml(result.model_id)}</span>` : '';
+        head.innerHTML = `<span class="result-ep-name">${Util.escapeHtml(result.endpoint_name || result.model_group || '')}</span>${modelTag}
+          <span class="result-ep-badges">${Cards.badgeRow(result)}</span>`;
+        panel.appendChild(head);
+        const body = document.createElement('div');
+        body.className = 'result-ep-body';
+        Cards.fillResultSections(body, result);
+        panel.appendChild(body);
+        bodyHost.appendChild(panel);
+        if (focusKey && key === focusKey) focusEl = panel;
+      }
+      if (!Store.resultsById.size || ![...Store.resultsById.keys()].some((k) => k.startsWith(prefix))) {
+        const hint = document.createElement('div');
+        hint.className = 'drawer-hint';
+        hint.textContent = '尚未运行，暂无响应。';
+        bodyHost.appendChild(hint);
+      }
+
+      document.body.classList.add('drawer-open');
+      if (focusEl) focusEl.scrollIntoView({ block: 'start' });
+      else bodyHost.scrollTop = 0;
     }
   };
 
@@ -1236,7 +1332,6 @@
       if (!targets) return;
       Store.stopFlag = false;
       Cards.setBusy(card, true);
-      Cards.toggle(card, true);
       UI.refreshControls();
       const batchId = Util.makeBatchId();
       try {
@@ -1287,7 +1382,6 @@
       const total = qs.length * targets.length; // question × (endpoint × model) pairs
       let next = 0, done = 0;
       const concurrency = Math.max(1, Math.min(20, Number(Util.el('opt-concurrency').value || 1)));
-      const collapseAfter = Util.el('opt-collapse-after').checked;
       const batchId = Util.makeBatchId();
       UI.progress(0, total);
 
@@ -1299,7 +1393,6 @@
           const card = Cards.forId(q.id);
           if (!card) continue;
           Cards.setBusy(card, true);
-          Cards.toggle(card, true);
           UI.flash(`${done}/${total} · ${q.name}`, 'running');
           const list = [];
           for (const { endpoint, model, cfg } of targets) {
@@ -1323,7 +1416,6 @@
             if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
           }
           Cards.renderResults(card, list);
-          if (collapseAfter && list.every((x) => x.result.ok)) Cards.toggle(card, false);
           Cards.setBusy(card, false);
         }
       };
@@ -1346,7 +1438,9 @@
 
   function exportLocalResults() {
     if (!Store.resultsById.size) return UI.flash('暂无结果', 'error');
-    const blob = new Blob([JSON.stringify([...Store.resultsById.values()], null, 2)], { type: 'application/json' });
+    const rows = [...Store.resultsById.entries()].map(([key, result]) =>
+      Object.assign({ verdict: Store.getVerdict(key) || null }, result));
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1454,9 +1548,14 @@
     Util.el('clear-results').addEventListener('click', Cards.clearResults);
     Util.el('export-results').addEventListener('click', exportLocalResults);
 
-    Util.el('expand-all').addEventListener('click', () => Cards.all().forEach((c) => Cards.toggle(c, true)));
-    Util.el('collapse-all').addEventListener('click', () => Cards.all().forEach((c) => Cards.toggle(c, false)));
     Util.el('filter-category').addEventListener('change', Cards.applyFilter);
+
+    // Detail drawer: scrim click, close button, and Esc all dismiss it.
+    Util.el('drawer-scrim').addEventListener('click', Drawer.close);
+    Util.el('drawer-close').addEventListener('click', Drawer.close);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && Drawer.isOpen()) Drawer.close();
+    });
 
     // Platform nav → switch views
     document.querySelectorAll('#platform-nav .nav-item').forEach((btn) => {

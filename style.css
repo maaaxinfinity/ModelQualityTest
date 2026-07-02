@@ -236,7 +236,7 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 .account .acc-menu button { min-height: 28px; padding: 3px 8px; font-size: 13px; }
 
 /* ───────────────────────── Main ───────────────────────── */
-.main { min-width: 0; padding: 32px 40px 72px; max-width: 1080px; }
+.main { min-width: 0; padding: 32px 40px 72px; max-width: 1680px; }
 @media (max-width: 1100px) { .main { padding: 28px 28px 64px; } }
 
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
@@ -403,8 +403,8 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .tests-actions select { width: auto; min-width: 130px; height: 32px; padding: 5px 10px; }
 .tests-actions button { font-size: 14px; padding: 5px 11px; min-height: 30px; }
 
-.qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-@media (max-width: 880px) { .qgrid { grid-template-columns: 1fr; } }
+.qgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; align-items: start; }
+@media (max-width: 560px) { .qgrid { grid-template-columns: 1fr; } }
 
 /* ───────────────────────── Test card ───────────────────────── */
 .qcard {
@@ -432,7 +432,21 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .qcard-expand { min-width: 30px; min-height: 30px; padding: 0; background: transparent; border-color: transparent; color: var(--text-3); }
 .qcard-expand:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 
-.qcard-desc { padding: 0 14px 12px; font-size: 14px; color: var(--text-3); line-height: 1.5; }
+.qcard-desc { padding: 0 14px 10px; font-size: 14px; color: var(--text-3); line-height: 1.5; }
+
+/* Observation point — always visible, compact, on the card. */
+.qcard-details { min-width: 30px; min-height: 30px; padding: 0 10px; background: transparent; border-color: var(--border); color: var(--text-2); font-size: 13.5px; }
+.qcard-details:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.qcard-observe {
+  margin: 0 14px 12px; padding: 9px 11px; font-size: 13px; line-height: 1.5;
+  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); white-space: pre-wrap; word-break: break-word;
+}
+.qcard-observe .observe-tag { display: inline-block; margin-right: 6px; font-weight: 650; color: var(--text-3); font-size: 12px; }
+
+/* Card manual-verdict accents (independent of transport ok/fail). */
+.qcard.verdict-pass { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); box-shadow: inset 3px 0 0 var(--success); }
+.qcard.verdict-fail { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); box-shadow: inset 3px 0 0 var(--danger); }
 
 .qcard-meta-row { display: none; flex-wrap: wrap; gap: 7px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
 .qcard.has-result .qcard-meta-row { display: flex; }
@@ -441,12 +455,23 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .badge.fail { background: var(--danger-bg); color: var(--danger); }
 .badge.info { background: var(--surface-3); color: var(--text); }
 
-.qcard-body { display: none; padding: 14px; border-top: 1px solid var(--border); flex-direction: column; gap: 11px; }
-.qcard.expanded .qcard-body { display: flex; }
+/* Compact per-result rows on the card (endpoint · model · badges · verdict). */
+.qcard-result { display: flex; flex-direction: column; gap: 8px; }
+.qcard-result:not(:empty) { padding: 11px 14px; border-top: 1px solid var(--border); }
+.result-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface); }
+.result-row.fail { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.result-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.result-row-name { font-size: 14px; font-weight: 600; }
+.result-row-model { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.result-row-badges { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+.result-row-details { margin-left: auto; }
+.verdict { display: flex; gap: 6px; margin-top: 7px; }
+.verdict-btn { font-size: 13px; padding: 3px 12px; min-height: 28px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: var(--radius-xs); cursor: pointer; }
+.verdict-btn:hover { border-color: var(--text-3); color: var(--text); }
+.verdict-btn.pass.active { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+.verdict-btn.fail.active { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
 
-/* Per-endpoint result panels (single or side-by-side comparison) */
-.qcard-result { display: flex; flex-direction: column; gap: 11px; }
-.qcard-result.multi { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+/* Per-endpoint result panels (rendered inside the detail drawer). */
 .result-endpoint { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .result-endpoint.fail { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .result-ep-head {
@@ -486,6 +511,30 @@ pre.code .n { color: var(--code-number); }
 pre.code .b { color: var(--code-bool); }
 pre.code .null { color: var(--code-null); }
 code { font-family: var(--mono); background: var(--surface-3); color: var(--text); padding: 2px 6px; border-radius: 5px; font-size: 13.5px; }
+
+/* ───────────────────────── Detail drawer ───────────────────────── */
+.drawer-scrim {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32);
+  opacity: 0; visibility: hidden; transition: opacity .18s; z-index: 40;
+}
+body.drawer-open .drawer-scrim { opacity: 1; visibility: visible; }
+.drawer {
+  position: fixed; top: 0; right: 0; height: 100vh; width: min(600px, 94vw);
+  background: var(--surface); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 41;
+  transform: translateX(100%); transition: transform .2s ease;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+}
+body.drawer-open .drawer { transform: translateX(0); }
+.drawer-head {
+  display: flex; align-items: center; gap: 10px; padding: 16px 18px;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.drawer-title { font-size: 16px; font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-close { min-width: 32px; min-height: 32px; padding: 0; background: transparent; border-color: transparent; color: var(--text-3); font-size: 15px; }
+.drawer-close:hover { background: var(--hover); color: var(--text); }
+.drawer-body { flex: 1; overflow: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.drawer-hint { font-size: 14px; color: var(--text-3); padding: 12px 0; }
 
 /* ───────────────────────── Shared boxes ───────────────────────── */
 .warn-box { background: var(--danger-bg); border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); color: var(--danger); padding: 9px 12px; border-radius: var(--radius-sm); font-size: 14px; white-space: pre-wrap; word-break: break-word; }
