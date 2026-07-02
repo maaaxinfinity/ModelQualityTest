@@ -14,7 +14,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.
 - The console uses a grouped sidebar: a Testing section (the five provider groups) and a Platform section (Endpoints, History, Admin).
 - Each type (provider group) can hold multiple named endpoints — e.g. "官方", "代理A", "Azure" — each with its own Base URL / API key. An endpoint is **not bound to a single model**: it maintains a model list. Endpoint configuration is stored in PostgreSQL (globally shared); API keys are encrypted at rest. Nothing but the UI theme is kept in browser `localStorage`.
-- Adding a channel requires a successful **model-list detection** (calls the channel's `/models` API with its key) before it can be saved. Detection returns the channel's full model list, shown as a **checkbox list in the detect panel**; you tick which models to **enable** for that endpoint, and save is gated on at least one enabled model. The full list and the enabled subset are stored on the endpoint. Lists refresh manually (同步模型) or automatically via the `/api/cron/sync-models` daily cron; a sync that drops a model upstream also prunes it from the enabled subset.
+- Adding a channel requires a successful **model-list detection** (calls the channel's `/models` API with its key) before it can be saved. Detection returns the channel's full model list, shown as a **checkbox list in the detect panel**; you tick which models to **enable** for that endpoint, and save is gated on at least one enabled model. The full list and the enabled subset are stored on the endpoint. Lists refresh manually (同步模型) or automatically via the daily `/api/cron/sync` cron; a sync that drops a model upstream also prunes it from the enabled subset.
 - The test page picks a target: select one or more endpoints, then pick one or more of each endpoint's **enabled models**. Every (question × endpoint × model) combination runs and renders side by side, so you can compare across endpoints and across models at once.
 - First TOTP enrollment becomes the initial admin; later admins join through invite codes created by an admin.
 - TOTP setup returns an otpauth URL rendered client-side as a QR with the qrbtf bundle, supports per-admin 2FA rotation, and rejects replayed TOTP counters.
@@ -76,7 +76,7 @@ npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
 
 Open the deployed site, bind the first TOTP account, and that user becomes the first administrator. Create invite codes from the admin panel for additional administrators.
 
-After the first admin login, click **Prices** once to seed `model_prices`. Vercel also runs `/api/cron/sync-prices` daily at 02:00 UTC.
+After the first admin login, click **Prices** once to seed `model_prices`. Vercel also runs `/api/cron/sync` daily at 02:00 UTC, which refreshes both the price table and every endpoint's model list. (Price sync and model-list sync share one function because the Hobby plan caps a deployment at 12 serverless functions.)
 
 ## Verification
 

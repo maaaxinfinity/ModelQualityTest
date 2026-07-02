@@ -34,9 +34,12 @@ ok('package scripts');
 
 const vercel = readJson('vercel.json');
 assert(vercel.functions && vercel.functions['api/run-test.js'], 'run-test function config missing');
-assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync-prices'), 'price sync cron missing');
-assert(vercel.crons.some((cron) => cron.path === '/api/cron/sync-models'), 'model sync cron missing');
-ok('vercel config');
+assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync'), 'combined sync cron missing');
+// Hobby plan caps a deployment at 12 serverless functions.
+const fnCount = fs.readdirSync(path.join(process.cwd(), 'api'), { recursive: true })
+  .filter((f) => String(f).endsWith('.js') && !String(f).replace(/\\/g, '/').includes('_lib/')).length;
+assert(fnCount <= 12, `too many serverless functions: ${fnCount} > 12 (Hobby plan cap)`);
+ok('vercel config', `${fnCount} functions`);
 
 global.window = global;
 require('../questions.js');

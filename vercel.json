@@ -6,10 +6,7 @@
     "api/admin/prices.js": {
       "maxDuration": 300
     },
-    "api/cron/sync-prices.js": {
-      "maxDuration": 300
-    },
-    "api/cron/sync-models.js": {
+    "api/cron/sync.js": {
       "maxDuration": 300
     },
     "api/**/*.js": {
@@ -29,12 +26,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/sync-prices",
+      "path": "/api/cron/sync",
       "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/sync-models",
-      "schedule": "0 3 * * *"
     }
   ]
 }
