@@ -1,6 +1,7 @@
 const { ensureSchema, query } = require('../_lib/db');
 const { requireAdmin, randomId } = require('../_lib/auth');
 const { encryptSecret, decryptSecret } = require('../_lib/secrets');
+const { buildModelsRequest, extractModelIds, fetchOnce, normalizeGroup } = require('../_lib/providers');
 const { readJson, sendJson, sendMethodNotAllowed } = require('../_lib/http');
 
 const GROUPS = ['OpenAI', 'Anthropic', 'Google', 'Sakana', 'Image'];
@@ -27,14 +28,55 @@ function rowToConfig(row) {
     imageSize: row.image_size || '1024x1024',
     apiKey: decryptSecret(row.api_key_cipher),
     hasApiKey: !!row.api_key_cipher,
+    models: Array.isArray(row.models_json) ? row.models_json : [],
+    modelsSyncedAt: row.models_synced_at,
     updatedAt: row.updated_at
   };
+}
+
+// Fetch a channel's model list using the given credentials. Reused by detect
+// (form values) and sync (stored, decrypted key). Throws on transport error;
+// returns { ok, status, models, message } describing the upstream result.
+async function fetchModels(group, cfg) {
+  const request = buildModelsRequest(group, cfg);
+  const resp = await fetchOnce(request, Number(cfg.timeout) || 30000);
+  if (!resp.ok) {
+    const body = resp.json || {};
+    const message = (body.error && (body.error.message || body.error.type)) || resp.statusText || 'upstream_error';
+    return { ok: false, status: resp.status, models: [], message };
+  }
+  return { ok: true, status: resp.status, models: extractModelIds(group, resp.json), message: null };
+}
+
+// Sync one stored endpoint row's model list. Best-effort: returns a summary.
+async function syncEndpointModels(row) {
+  const cfg = {
+    group: row.model_group,
+    baseUrl: row.base_url || '',
+    authMode: row.auth_mode || 'bearer',
+    apiKey: decryptSecret(row.api_key_cipher)
+  };
+  if (!cfg.apiKey) return { id: row.id, name: row.name, ok: false, message: 'no_api_key' };
+  try {
+    const res = await fetchModels(row.model_group, cfg);
+    if (!res.ok) return { id: row.id, name: row.name, ok: false, status: res.status, message: res.message };
+    const updated = await query(
+      'update endpoint_configs set models_json=$1, models_synced_at=now() where id=$2 returning models_synced_at',
+      [JSON.stringify(res.models), row.id]
+    );
+    return { id: row.id, name: row.name, ok: true, count: res.models.length, syncedAt: updated.rows[0].models_synced_at };
+  } catch (e) {
+    return { id: row.id, name: row.name, ok: false, message: e.message };
+  }
 }
 
 module.exports = async function handler(req, res) {
   await ensureSchema();
   const user = await requireAdmin(req, res);
   if (!user) return;
+
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const action = url.searchParams.get('action');
 
   if (req.method === 'GET') {
     const result = await query('select * from endpoint_configs order by model_group, name');
@@ -51,6 +93,49 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       return sendJson(res, 400, { error: 'bad_json', detail: e.message });
     }
+
+    // Probe a channel's model list without writing. Uses form apiKey, or the
+    // stored (decrypted) key when only { id } is given.
+    if (action === 'detect') {
+      const group = normalizeGroup(payload.group);
+      if (!GROUPS.includes(group)) return sendJson(res, 400, { error: 'bad_group' });
+      let cfg = {
+        group,
+        baseUrl: String(payload.baseUrl || '').trim(),
+        authMode: payload.authMode || 'bearer',
+        apiKey: typeof payload.apiKey === 'string' ? payload.apiKey.trim() : ''
+      };
+      if (!cfg.apiKey && payload.id) {
+        const stored = await query('select * from endpoint_configs where id=$1', [String(payload.id)]);
+        if (stored.rows[0]) {
+          cfg.apiKey = decryptSecret(stored.rows[0].api_key_cipher);
+          if (!cfg.baseUrl) cfg.baseUrl = stored.rows[0].base_url || '';
+        }
+      }
+      if (!cfg.apiKey) return sendJson(res, 400, { error: 'missing_api_key', detail: '请先填写 API Key' });
+      try {
+        const result = await fetchModels(group, cfg);
+        if (!result.ok) return sendJson(res, 502, { error: 'detect_failed', status: result.status, detail: result.message });
+        return sendJson(res, 200, { ok: true, models: result.models, count: result.models.length });
+      } catch (e) {
+        return sendJson(res, 502, { error: 'detect_failed', detail: e.message });
+      }
+    }
+
+    // Sync stored endpoints' model lists (one via { id }, or all).
+    if (action === 'sync') {
+      let rows;
+      if (payload.id) {
+        rows = (await query('select * from endpoint_configs where id=$1', [String(payload.id)])).rows;
+      } else {
+        rows = (await query('select * from endpoint_configs')).rows;
+      }
+      const results = [];
+      for (const row of rows) results.push(await syncEndpointModels(row));
+      return sendJson(res, 200, { ok: true, results });
+    }
+
+    // Upsert one endpoint.
     const group = String(payload.group || '').trim();
     if (!GROUPS.includes(group)) return sendJson(res, 400, { error: 'bad_group' });
     const name = String(payload.name || '').trim();
@@ -61,14 +146,17 @@ module.exports = async function handler(req, res) {
     // not wipe a saved key. Encrypt only when a new key is provided.
     const hasNewKey = typeof payload.apiKey === 'string' && payload.apiKey.trim() !== '';
     const cipher = hasNewKey ? encryptSecret(payload.apiKey.trim()) : null;
+    // Model list: caller may pass a detected list; null leaves the stored one.
+    const models = Array.isArray(payload.models) ? JSON.stringify(payload.models) : null;
 
     try {
       const result = await query(
         `insert into endpoint_configs (
            id, model_group, name, base_url, model, auth_mode, max_tokens, timeout, delay,
            system_prompt, image_n, image_quality, image_size, api_key_cipher,
-           updated_by, updated_at
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())
+           models_json, models_synced_at, updated_by, updated_at
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+           case when $15 is null then null else now() end, $16, now())
          on conflict (id) do update set
            model_group = excluded.model_group,
            name = excluded.name,
@@ -83,6 +171,8 @@ module.exports = async function handler(req, res) {
            image_quality = excluded.image_quality,
            image_size = excluded.image_size,
            api_key_cipher = coalesce(excluded.api_key_cipher, endpoint_configs.api_key_cipher),
+           models_json = coalesce(excluded.models_json, endpoint_configs.models_json),
+           models_synced_at = case when excluded.models_json is null then endpoint_configs.models_synced_at else now() end,
            updated_by = excluded.updated_by,
            updated_at = now()
          returning *`,
@@ -101,6 +191,7 @@ module.exports = async function handler(req, res) {
           String(payload.imageQuality || 'medium').trim() || 'medium',
           String(payload.imageSize || '1024x1024').trim() || '1024x1024',
           cipher,
+          models,
           user.id
         ]
       );
@@ -114,7 +205,6 @@ module.exports = async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     let id = url.searchParams.get('id');
     if (!id) {
       try { id = (await readJson(req)).id; } catch (e) { id = null; }
@@ -126,3 +216,5 @@ module.exports = async function handler(req, res) {
 
   return sendMethodNotAllowed(res, ['GET', 'POST', 'DELETE']);
 };
+
+module.exports.syncEndpointModels = syncEndpointModels;

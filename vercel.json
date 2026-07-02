@@ -9,6 +9,9 @@
     "api/cron/sync-prices.js": {
       "maxDuration": 300
     },
+    "api/cron/sync-models.js": {
+      "maxDuration": 300
+    },
     "api/**/*.js": {
       "maxDuration": 60
     }
@@ -28,6 +31,10 @@
     {
       "path": "/api/cron/sync-prices",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/sync-models",
+      "schedule": "0 3 * * *"
     }
   ]
 }

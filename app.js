@@ -126,6 +126,8 @@
     activeView: 'test',     // test | endpoints | history | admin
     editingGroup: 'OpenAI', // group currently shown in the Endpoints editor
     editingId: null,        // endpoint id loaded in the editor; null = new endpoint
+    detectedModels: null,   // model list from the last successful detect (for save)
+    detectOk: false,        // has the current form passed model detection?
     configs: {},            // group -> array of endpoints loaded from the database
     selected: {},           // group -> array of selected endpoint ids (for the next run)
     sessionUser: null,
@@ -221,11 +223,16 @@
       $cfg.imageSize.value = cfg.imageSize || '1024x1024';
       Util.el('view-endpoints').classList.toggle('is-image', group === 'Image');
       Util.el('delete-endpoint').hidden = !Store.editingId;
+      // A saved endpoint keeps its detected models; a new form must detect first.
+      Store.detectedModels = target && target.models && target.models.length ? target.models.slice() : null;
+      Store.detectOk = !!(Store.detectedModels && Store.detectedModels.length);
       Config.buildTabs();
       Config.buildEndpointList();
       Config.summary();
+      Config.renderModels(target ? target.modelsSyncedAt : null);
+      Config.updateGate();
       Util.el('endpoints-output').innerHTML = list.length ? '' :
-        '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击保存以创建。</div>';
+        '<div class="empty-state">该分组还没有端点，填写名称与 API Key 后点击“检测模型列表”，通过后即可保存。</div>';
     },
 
     readForm() {
@@ -251,14 +258,102 @@
       const out = Util.el('endpoints-output');
       const form = Config.readForm();
       if (!form.name) { out.innerHTML = '<div class="warn-box">请填写端点名称。</div>'; return; }
+      if (!Store.detectOk || !Store.detectedModels || !Store.detectedModels.length) {
+        out.innerHTML = '<div class="warn-box">请先点击“检测模型列表”，检测通过后才能保存。</div>';
+        return;
+      }
+      form.models = Store.detectedModels;
       try {
         const data = await Api.call('/api/admin/endpoints', { method: 'POST', body: JSON.stringify(form) });
         await Config.loadAll();
         Config.fill(form.group, data.config.id);
-        out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」。</div>`;
+        Picker.render();
+        out.innerHTML = `<div class="ok-box">已保存端点「${Util.escapeHtml(data.config.name)}」（${data.config.models.length} 个模型）。</div>`;
       } catch (e) {
         out.innerHTML = `<div class="warn-box">保存失败：${Util.escapeHtml(e.message)}</div>`;
       }
+    },
+
+    // Probe the channel's model list. On success, unlock save.
+    async detect() {
+      const out = Util.el('endpoints-output');
+      const btn = Util.el('detect-models');
+      const form = Config.readForm();
+      if (!form.apiKey && !Store.editingId) { out.innerHTML = '<div class="warn-box">请先填写 API Key。</div>'; return; }
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '检测中…';
+      try {
+        const data = await Api.call('/api/admin/endpoints?action=detect', { method: 'POST', body: JSON.stringify(form) });
+        Store.detectedModels = data.models || [];
+        Store.detectOk = Store.detectedModels.length > 0;
+        Config.renderModels(new Date().toISOString());
+        Config.updateGate();
+        out.innerHTML = Store.detectOk
+          ? `<div class="ok-box">检测通过，获取到 ${data.count} 个模型。现在可以保存。</div>`
+          : '<div class="warn-box">连接成功，但该渠道未返回任何模型。</div>';
+      } catch (e) {
+        Store.detectOk = false;
+        Config.updateGate();
+        const detail = (e.body && (e.body.detail || e.body.status)) ? `${e.body.detail || ''}${e.body.status ? ' (HTTP ' + e.body.status + ')' : ''}` : e.message;
+        out.innerHTML = `<div class="warn-box">检测失败：${Util.escapeHtml(detail)}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    },
+
+    // Re-sync the currently saved endpoint's model list from upstream.
+    async sync() {
+      if (!Store.editingId) return;
+      const out = Util.el('endpoints-output');
+      try {
+        const data = await Api.call('/api/admin/endpoints?action=sync', { method: 'POST', body: JSON.stringify({ id: Store.editingId }) });
+        const r = (data.results || [])[0] || {};
+        if (!r.ok) { out.innerHTML = `<div class="warn-box">同步失败：${Util.escapeHtml(r.message || '未知错误')}</div>`; return; }
+        await Config.loadAll();
+        Config.fill(Store.editingGroup, Store.editingId);
+        Picker.render();
+        out.innerHTML = `<div class="ok-box">已同步，${r.count} 个模型。</div>`;
+      } catch (e) {
+        out.innerHTML = `<div class="warn-box">同步失败：${Util.escapeHtml(e.message)}</div>`;
+      }
+    },
+
+    // Any credential/URL change invalidates a prior detection.
+    invalidateDetect() {
+      if (Store.detectOk) {
+        Store.detectOk = false;
+        Config.updateGate();
+      }
+    },
+
+    // Save is allowed only once the current form has passed detection.
+    updateGate() {
+      const btn = Util.el('save-endpoint');
+      if (btn) btn.disabled = !Store.detectOk;
+      const sync = Util.el('sync-models');
+      if (sync) sync.hidden = !Store.editingId;
+    },
+
+    renderModels(syncedAt) {
+      const node = Util.el('endpoints-models');
+      if (!node) return;
+      const models = Store.detectedModels || [];
+      if (!models.length) {
+        node.innerHTML = '<span class="models-hint">尚未检测模型列表。</span>';
+        return;
+      }
+      const when = syncedAt ? ` · 同步于 ${new Date(syncedAt).toLocaleString()}` : '';
+      const shown = models.slice(0, 40).map((m) => `<span class="model-pill" data-model="${Util.escapeAttr(m)}">${Util.escapeHtml(m)}</span>`).join('');
+      const more = models.length > 40 ? `<span class="models-hint">…还有 ${models.length - 40} 个</span>` : '';
+      node.innerHTML = `<div class="models-head">已检测 ${models.length} 个模型${when}</div><div class="models-list">${shown}${more}</div>`;
+      // Clicking a pill sets the Model field; also feed the datalist for typeahead.
+      node.querySelectorAll('.model-pill').forEach((pill) => {
+        pill.addEventListener('click', () => { $cfg.model.value = pill.dataset.model; Config.summary(); });
+      });
+      const dl = Util.el('model-suggestions');
+      if (dl) dl.innerHTML = models.map((m) => `<option value="${Util.escapeAttr(m)}"></option>`).join('');
     },
 
     async remove() {
@@ -1228,9 +1323,14 @@
     // Endpoints page
     Util.el('save-endpoint').addEventListener('click', Config.save);
     Util.el('delete-endpoint').addEventListener('click', Config.remove);
+    Util.el('detect-models').addEventListener('click', Config.detect);
+    Util.el('sync-models').addEventListener('click', Config.sync);
     $cfg.name.addEventListener('input', Config.summary);
-    $cfg.baseUrl.addEventListener('input', Config.summary);
     $cfg.model.addEventListener('input', Config.summary);
+    // Changing the URL/key/auth invalidates a prior detection (must re-detect to save).
+    $cfg.baseUrl.addEventListener('input', () => { Config.summary(); Config.invalidateDetect(); });
+    $cfg.apiKey.addEventListener('input', Config.invalidateDetect);
+    $cfg.authMode.addEventListener('change', Config.invalidateDetect);
 
     // History page
     Util.el('refresh-logs').addEventListener('click', Admin.refreshLogs);

@@ -92,6 +92,8 @@ create table if not exists endpoint_configs (
   image_quality text,
   image_size text,
   api_key_cipher text,
+  models_json jsonb,
+  models_synced_at timestamptz,
   updated_by text references app_users(id),
   updated_at timestamptz not null default now(),
   unique (model_group, name)

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 global.window = global;
 require('../questions.js');
 
-const { buildUpstreamRequest } = require('../api/_lib/providers');
+const { buildUpstreamRequest, buildModelsRequest, extractModelIds } = require('../api/_lib/providers');
 const { extractAllowedRows } = require('../api/_lib/pricing');
 const { issueSession } = require('../api/_lib/auth');
 
@@ -111,6 +111,28 @@ const sakanaRequest = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'sakan
 assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');
 assert.equal(sakanaRequest.body.model, 'fugu-ultra');
 assert.equal(sakanaRequest.endpointType, 'sakana_responses');
+
+// Model-list detection: request shape per provider + response normalization.
+const oaiModels = buildModelsRequest('OpenAI', { apiKey: 'sk-x', baseUrl: 'https://proxy.example.com' });
+assert.equal(oaiModels.endpoint, 'https://proxy.example.com/v1/models');
+assert.equal(oaiModels.method, 'GET');
+assert.equal(oaiModels.headers.Authorization, 'Bearer sk-x');
+
+const antModels = buildModelsRequest('Anthropic', { apiKey: 'sk-a' });
+assert.equal(antModels.endpoint, 'https://api.anthropic.com/v1/models');
+assert.equal(antModels.headers['x-api-key'], 'sk-a');
+assert.equal(antModels.headers['anthropic-version'], '2023-06-01');
+
+const gModels = buildModelsRequest('Google', { apiKey: 'sk-g' });
+assert.equal(gModels.endpoint, 'https://generativelanguage.googleapis.com/v1beta/models');
+assert.equal(gModels.headers['x-goog-api-key'], 'sk-g');
+
+assert.throws(() => buildModelsRequest('OpenAI', { baseUrl: 'https://x' }), /apiKey/);
+
+assert.deepEqual(extractModelIds('OpenAI', { data: [{ id: 'gpt-b' }, { id: 'gpt-a' }, { id: 'gpt-a' }] }), ['gpt-a', 'gpt-b']);
+assert.deepEqual(extractModelIds('Anthropic', { data: [{ id: 'claude-2' }] }), ['claude-2']);
+assert.deepEqual(extractModelIds('Google', { models: [{ name: 'models/gemini-3' }, { name: 'models/gemini-2' }] }), ['gemini-2', 'gemini-3']);
+assert.deepEqual(extractModelIds('OpenAI', {}), []);
 
 const rows = extractAllowedRows(fakeModelsDev());
 const key = (row) => `${row.model_group}:${row.source_provider}:${row.model_id}`;

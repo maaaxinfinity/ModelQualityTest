@@ -192,6 +192,53 @@ function buildUpstreamRequest(question, cfg) {
   return buildOpenAIResponses(question, cfg, 'OpenAI');
 }
 
+// Build a GET request for a channel's model-list API. Mirrors the auth-header
+// logic of the build* functions so detection uses the same credentials a run would.
+function buildModelsRequest(group, cfg) {
+  const groupName = normalizeGroup(group || cfg.group);
+  if (!cfg.apiKey) throw new Error('apiKey is required');
+  const baseUrl = cfg.baseUrl || (DEFAULTS[groupName] || DEFAULTS.OpenAI).baseUrl;
+
+  if (groupName === 'Google') {
+    return {
+      endpoint: slashJoin(baseUrl, '/v1beta/models'),
+      method: 'GET',
+      headers: { 'x-goog-api-key': cfg.apiKey }
+    };
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (groupName === 'Anthropic') {
+    const mode = cfg.authMode || 'x-api-key';
+    if (mode === 'bearer') headers.Authorization = `Bearer ${cfg.apiKey}`;
+    else if (mode === 'both') { headers.Authorization = `Bearer ${cfg.apiKey}`; headers['x-api-key'] = cfg.apiKey; }
+    else headers['x-api-key'] = cfg.apiKey;
+    headers['anthropic-version'] = cfg.version || '2023-06-01';
+  } else {
+    // OpenAI / Sakana / Image — OpenAI-compatible /v1/models with Bearer.
+    headers.Authorization = `Bearer ${cfg.apiKey}`;
+    if (cfg.organization) headers['OpenAI-Organization'] = cfg.organization;
+    if (cfg.project) headers['OpenAI-Project'] = cfg.project;
+  }
+  return { endpoint: withV1(baseUrl, 'models'), method: 'GET', headers };
+}
+
+// Normalize a model-list response into a sorted, de-duplicated array of model ids.
+function extractModelIds(group, body) {
+  if (!body || typeof body !== 'object') return [];
+  const groupName = normalizeGroup(group);
+  let ids = [];
+  if (groupName === 'Google') {
+    ids = (Array.isArray(body.models) ? body.models : [])
+      .map((m) => String(m.name || '').replace(/^models\//, ''));
+  } else {
+    // OpenAI-compatible + Anthropic both use { data: [{ id }] }.
+    const list = Array.isArray(body.data) ? body.data : (Array.isArray(body.models) ? body.models : []);
+    ids = list.map((m) => (typeof m === 'string' ? m : m.id || m.name || ''));
+  }
+  return [...new Set(ids.filter(Boolean).map((s) => String(s)))].sort();
+}
+
 function sanitizePayload(value) {
   if (Array.isArray(value)) return value.map(sanitizePayload);
   if (!value || typeof value !== 'object') return value;
@@ -299,6 +346,8 @@ function estimateTextTokens(text) {
 module.exports = {
   DEFAULTS,
   buildUpstreamRequest,
+  buildModelsRequest,
+  extractModelIds,
   fetchOnce,
   normalizeGroup,
   normalizeUsage,

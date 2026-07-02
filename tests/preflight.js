@@ -35,6 +35,7 @@ ok('package scripts');
 const vercel = readJson('vercel.json');
 assert(vercel.functions && vercel.functions['api/run-test.js'], 'run-test function config missing');
 assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync-prices'), 'price sync cron missing');
+assert(vercel.crons.some((cron) => cron.path === '/api/cron/sync-models'), 'model sync cron missing');
 ok('vercel config');
 
 global.window = global;
