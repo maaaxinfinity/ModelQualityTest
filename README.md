@@ -9,6 +9,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Google tests target Gemini `models/*:generateContent`.
 - Sakana tests target Fugu through an OpenAI-compatible Responses shape.
 - Image tests target `gpt-image-2` and cover `n`, `quality`, `size`, and a small burst load test.
+- Text test requests (OpenAI Responses, Anthropic Messages, Google, Sakana) are issued as **streaming (SSE)** calls; the server reassembles the stream into the same final JSON a buffered call would return, so usage/cost/logging are unchanged. Image generation stays non-streaming. Anthropic requests send the `claude-cli/2.1.198 (external, cli)` User-Agent.
 - Every test run is logged to PostgreSQL and can be exported from the admin panel.
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
 - Price sync stores only the provider/model rows needed by the five groups: OpenAI, Anthropic, Google, Sakana/Fugu, and Image. It does not persist unrelated providers from models.dev.

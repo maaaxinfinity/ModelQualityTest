@@ -112,6 +112,22 @@ assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');
 assert.equal(sakanaRequest.body.model, 'fugu-ultra');
 assert.equal(sakanaRequest.endpointType, 'sakana_responses');
 
+// Streaming: every text provider streams (body.stream + request.stream); Image does not.
+const oaiReq = buildUpstreamRequest(QUESTIONS.find((q) => q.group === 'OpenAI'), cfgFor('OpenAI'));
+const antReq = buildUpstreamRequest(QUESTIONS.find((q) => q.group === 'Anthropic' && !/count_tokens/.test(q.endpoint_path || '')), cfgFor('Anthropic'));
+const gReq = buildUpstreamRequest(QUESTIONS.find((q) => q.group === 'Google'), cfgFor('Google'));
+// OpenAI/Anthropic/Sakana carry stream in the body; Google signals it via the URL verb.
+for (const req of [oaiReq, antReq, sakanaRequest]) {
+  assert.equal(req.body.stream, true, `${req.endpointType} body.stream must be true`);
+}
+for (const req of [oaiReq, antReq, gReq, sakanaRequest]) {
+  assert.equal(req.stream, true, `${req.endpointType} request.stream must be true`);
+}
+assert.ok(gReq.endpoint.endsWith(':streamGenerateContent?alt=sse'), 'Google must use streamGenerateContent SSE');
+assert.equal(antReq.headers['User-Agent'], 'claude-cli/2.1.198 (external, cli)');
+assert.equal(imageRequest.body.stream, undefined, 'Image must not stream');
+assert.notEqual(imageRequest.stream, true);
+
 // Model-list detection: request shape per provider + response normalization.
 const oaiModels = buildModelsRequest('OpenAI', { apiKey: 'sk-x', baseUrl: 'https://proxy.example.com' });
 assert.equal(oaiModels.endpoint, 'https://proxy.example.com/v1/models');
