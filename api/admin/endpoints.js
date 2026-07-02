@@ -164,8 +164,8 @@ async function handleRequest(req, res) {
            id, model_group, name, base_url, model, auth_mode, max_tokens, timeout, delay,
            system_prompt, image_n, image_quality, image_size, api_key_cipher,
            models_json, enabled_models_json, models_synced_at, updated_by, updated_at
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-           case when $15 is null then null else now() end, $17, now())
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,
+           case when $15::jsonb is null then null else now() end, $17, now())
          on conflict (id) do update set
            model_group = excluded.model_group,
            name = excluded.name,
