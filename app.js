@@ -1164,46 +1164,98 @@
       card.classList.toggle('verdict-fail', v === 'fail');
     },
 
-    // Render one or more results into a card as compact rows + manual verdict.
-    // list = [{endpoint, model, result}].
+    // The name·model prefix shared by pending / running / done result rows.
+    resultRowLabel(endpoint, model) {
+      const modelTag = model ? `<span class="result-row-model">${Util.escapeHtml(model)}</span>` : '';
+      return `<span class="result-row-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}`;
+    },
+
+    // A finished result row: name · model · badges · verdict.
+    buildResultRow(card, key, endpoint, model, result) {
+      const row = document.createElement('div');
+      row.className = 'result-row ' + (result.ok ? 'ok' : 'fail');
+      row.dataset.key = key;
+      const head = document.createElement('div');
+      head.className = 'result-row-head';
+      head.innerHTML = Cards.resultRowLabel(endpoint, model) +
+        `<span class="result-row-badges">${Cards.badgeRow(result)}</span>`;
+      head.appendChild(Cards.verdictControls(key, card));
+      row.appendChild(head);
+      return row;
+    },
+
+    // Aggregate strip: only for multi-target runs (a single result carries its own
+    // badges in the row below, so the strip stays empty and hidden).
+    setAggregate(card, list) {
+      const meta = card.querySelector('.qcard-meta-row');
+      if (list.length <= 1) { meta.innerHTML = ''; return; }
+      const anyFail = list.some((x) => !x.result.ok);
+      const okN = list.filter((x) => x.result.ok).length;
+      const cost = list.reduce((s, x) => s + Number(x.result.estimated_cost_usd || 0), 0);
+      meta.innerHTML = [
+        Util.badge(`${okN}/${list.length} OK`, anyFail ? 'fail' : 'ok'),
+        Util.badge(`${list.length} 组运行`),
+        cost ? Util.badge(`$${Util.formatCost(cost)}`, 'info') : ''
+      ].filter(Boolean).join('');
+    },
+
+    // Pre-render one queued row per target so a multi-model run shows every
+    // (endpoint × model) up front, then fills in as each completes.
+    renderTargets(card, targets) {
+      card.classList.remove('ok', 'fail');
+      card.classList.add('has-result');
+      const meta = card.querySelector('.qcard-meta-row');
+      meta.innerHTML = targets.length > 1 ? Util.badge(`0 / ${targets.length} 完成`) : '';
+      const host = card.querySelector('.qcard-result');
+      host.innerHTML = '';
+      for (const { endpoint, model } of targets) {
+        const row = document.createElement('div');
+        row.className = 'result-row pending';
+        row.dataset.key = Store.resultKey(card.dataset.qid, endpoint.id, model);
+        row.innerHTML = `<div class="result-row-head">${Cards.resultRowLabel(endpoint, model)}` +
+          `<span class="result-row-state"><span class="dot-wait"></span>排队中</span></div>`;
+        host.appendChild(row);
+      }
+    },
+
+    rowByKey(card, key) {
+      return card.querySelector(`.result-row[data-key="${(window.CSS && CSS.escape) ? CSS.escape(key) : key}"]`);
+    },
+
+    // Flip a queued row to the running state (spinner).
+    markResultRunning(card, key) {
+      const row = Cards.rowByKey(card, key);
+      if (!row) return;
+      row.className = 'result-row running';
+      const state = row.querySelector('.result-row-state');
+      if (state) state.innerHTML = `<span class="busy-spinner sm"></span>运行中`;
+    },
+
+    // Replace a running row with its finished result and advance the counter.
+    fillResultRow(card, key, endpoint, model, result) {
+      const row = Cards.rowByKey(card, key);
+      if (row) row.replaceWith(Cards.buildResultRow(card, key, endpoint, model, result));
+      const rows = card.querySelectorAll('.qcard-result .result-row');
+      const total = rows.length;
+      const done = card.querySelectorAll('.qcard-result .result-row.ok, .qcard-result .result-row.fail').length;
+      if (total > 1) {
+        const meta = card.querySelector('.qcard-meta-row');
+        meta.innerHTML = Util.badge(`${done} / ${total} 完成`, done === total ? 'ok' : '');
+      }
+      Cards.applyCardVerdict(card);
+    },
+
+    // Render one or more finished results into a card. list = [{endpoint, model, result}].
     renderResults(card, list) {
       const anyFail = list.some((x) => !x.result.ok);
       card.classList.remove('ok', 'fail');
       card.classList.add(anyFail ? 'fail' : 'ok', 'has-result');
-
-      // Aggregate strip only for multi-endpoint runs; a single result carries its
-      // own badges in the row below, so the strip stays empty (and stays hidden).
-      const meta = card.querySelector('.qcard-meta-row');
-      if (list.length > 1) {
-        const okN = list.filter((x) => x.result.ok).length;
-        const cost = list.reduce((s, x) => s + Number(x.result.estimated_cost_usd || 0), 0);
-        meta.innerHTML = [
-          Util.badge(`${okN}/${list.length} OK`, anyFail ? 'fail' : 'ok'),
-          Util.badge(`${list.length} 组运行`),
-          cost ? Util.badge(`$${Util.formatCost(cost)}`, 'info') : ''
-        ].filter(Boolean).join('');
-      } else {
-        meta.innerHTML = '';
-      }
-
+      Cards.setAggregate(card, list);
       const host = card.querySelector('.qcard-result');
       host.innerHTML = '';
-
-      // One compact row per (endpoint × model): name · model · badges · verdict.
-      // The full request/response detail lives in the drawer (card-level 详情).
       for (const { endpoint, model, result } of list) {
         const key = Store.resultKey(card.dataset.qid, endpoint.id, model);
-        const row = document.createElement('div');
-        row.className = 'result-row ' + (result.ok ? 'ok' : 'fail');
-        const modelTag = model ? `<span class="result-row-model">${Util.escapeHtml(model)}</span>` : '';
-        const head = document.createElement('div');
-        head.className = 'result-row-head';
-        head.innerHTML =
-          `<span class="result-row-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}` +
-          `<span class="result-row-badges">${Cards.badgeRow(result)}</span>`;
-        head.appendChild(Cards.verdictControls(key, card));
-        row.appendChild(head);
-        host.appendChild(row);
+        host.appendChild(Cards.buildResultRow(card, key, endpoint, model, result));
       }
       Cards.applyCardVerdict(card);
     },
@@ -1399,11 +1451,15 @@
       if (!targets) return;
       Store.stopFlag = false;
       Cards.setBusy(card, true);
+      Cards.renderTargets(card, targets);
       UI.refreshControls();
       const batchId = Util.makeBatchId();
       try {
         UI.flash(`运行中 · ${q.name}`, 'running');
-        const list = await Runner.runAcross(q, targets, batchId);
+        const list = await Runner.runAcross(q, targets, batchId, {
+          onStart: (key) => Cards.markResultRunning(card, key),
+          onDone: (key, endpoint, model, result) => Cards.fillResultRow(card, key, endpoint, model, result)
+        });
         Cards.renderResults(card, list);
         const okAll = list.every((x) => x.result.ok);
         UI.flash(okAll ? `完成 · ${q.name}` : `失败 · ${q.name}`, okAll ? 'done' : 'error');
@@ -1413,11 +1469,15 @@
       }
     },
 
-    // Run a single question against all targets; store + return [{endpoint, result}].
-    async runAcross(q, targets, batchId) {
+    // Run a question against every target in turn, storing each result and firing
+    // hooks.onStart / hooks.onDone so callers can show live per-target progress.
+    // Returns [{endpoint, model, result}].
+    async runAcross(q, targets, batchId, hooks = {}) {
       const list = [];
       for (const { endpoint, model, cfg } of targets) {
         if (Store.stopFlag) break;
+        const key = Store.resultKey(q.id, endpoint.id, model);
+        if (hooks.onStart) hooks.onStart(key, endpoint, model);
         const controller = new AbortController();
         Store.inflight.add(controller);
         let result;
@@ -1430,7 +1490,8 @@
           Store.inflight.delete(controller);
         }
         list.push({ endpoint, model, result });
-        Store.resultsById.set(`${q.id}::${endpoint.id}::${model}`, Object.assign({ endpoint_name: endpoint.name, model_id: model }, result));
+        Store.resultsById.set(key, Object.assign({ endpoint_name: endpoint.name, model_id: model }, result));
+        if (hooks.onDone) hooks.onDone(key, endpoint, model, result);
         if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
       }
       return list;
@@ -1460,28 +1521,17 @@
           const card = Cards.forId(q.id);
           if (!card) continue;
           Cards.setBusy(card, true);
+          Cards.renderTargets(card, targets);
           UI.flash(`${done}/${total} · ${q.name}`, 'running');
-          const list = [];
-          for (const { endpoint, model, cfg } of targets) {
-            if (Store.stopFlag) break;
-            const controller = new AbortController();
-            Store.inflight.add(controller);
-            let result;
-            try {
-              const data = await Api.runTest({ question: q, cfg, batchId }, controller.signal);
-              result = data.result;
-            } catch (e) {
-              result = { ok: false, error_message: e.message, question_id: q.id, question_name: q.name, model_group: q.group };
-            } finally {
-              Store.inflight.delete(controller);
+          const list = await Runner.runAcross(q, targets, batchId, {
+            onStart: (key) => Cards.markResultRunning(card, key),
+            onDone: (key, endpoint, model, result) => {
+              Cards.fillResultRow(card, key, endpoint, model, result);
               done++;
               UI.flash(`${done}/${total}`, 'running');
               UI.progress(done, total);
             }
-            list.push({ endpoint, model, result });
-            Store.resultsById.set(`${q.id}::${endpoint.id}::${model}`, Object.assign({ endpoint_name: endpoint.name, model_id: model }, result));
-            if (!Store.stopFlag && cfg.delay > 0) await Util.sleep(cfg.delay);
-          }
+          });
           Cards.renderResults(card, list);
           Cards.setBusy(card, false);
         }

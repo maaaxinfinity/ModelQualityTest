@@ -430,6 +430,23 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .qcard.ok { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
 .qcard.fail { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 
+/* Flowing accent light while a card is running: a bright segment travels around
+   the border over a faint always-on accent ring (so no edge ever looks border-
+   less). Degrades to a static arc where @property is unsupported. */
+@property --qflow { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+.qcard.busy { position: relative; border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.qcard.busy::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  border-radius: inherit; padding: 1.5px;
+  background: conic-gradient(from var(--qflow),
+    transparent 0 58%, color-mix(in srgb, var(--accent) 45%, transparent) 76%,
+    var(--accent) 88%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: qflow-spin 1.4s linear infinite;
+}
+@keyframes qflow-spin { to { --qflow: 360deg; } }
+
 .qcard-head { display: flex; align-items: flex-start; gap: 8px; padding: 13px 14px; cursor: pointer; }
 .qcard-status { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--border-3); flex: none; }
 .qcard.ok .qcard-status { background: var(--success); }
@@ -483,6 +500,12 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .result-row-name { font-size: 13.5px; font-weight: 650; }
 .result-row-model { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
 .result-row-badges { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+/* Live per-target progress: queued → running → result, updated as each completes. */
+.result-row.pending { opacity: .55; }
+.result-row-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--text-3); }
+.result-row.running .result-row-state { color: var(--accent); }
+.dot-wait { width: 7px; height: 7px; border-radius: 50%; background: var(--border-3); }
+.busy-spinner.sm { width: 11px; height: 11px; border-width: 2px; margin-right: 0; }
 .verdict { display: inline-flex; gap: 6px; margin-left: auto; }
 .verdict-btn { font-size: 12.5px; padding: 3px 10px; min-height: 27px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: var(--radius-xs); cursor: pointer; }
 .verdict-btn:hover { border-color: var(--text-3); color: var(--text); }
