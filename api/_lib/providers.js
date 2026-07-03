@@ -109,10 +109,10 @@ function convertTool(tool) {
 // Sakana / Fugu rejects reasoning.effort outside ('high','xhigh','max'); the
 // Responses spec value 'medium' (and lower) is invalid there. Clamp up so the
 // same probe definitions work against both OpenAI and Sakana.
+const SAKANA_EFFORTS = new Set(['high', 'xhigh', 'max']);
 function sakanaReasoning(reasoning) {
   if (!reasoning || typeof reasoning !== 'object') return reasoning;
-  const allowed = new Set(['high', 'xhigh', 'max']);
-  if (reasoning.effort && !allowed.has(reasoning.effort)) {
+  if (reasoning.effort && !SAKANA_EFFORTS.has(reasoning.effort)) {
     return Object.assign({}, reasoning, { effort: 'high' });
   }
   return reasoning;

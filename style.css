@@ -414,8 +414,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   font-size: 12px; font-weight: 650; color: var(--text-3); background: var(--surface-3); border-radius: 999px;
 }
 .qsection-head::after { content: ""; flex: 1; height: 1px; background: var(--border); }
-.qgrid-inner { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; align-items: start; }
-@media (max-width: 560px) { .qgrid-inner { grid-template-columns: 1fr; } }
+/* Masonry-style column packing: cards flow tightly with no row-height alignment,
+   so a tall card with results never leaves blank space beside short cards. */
+.qgrid-inner { columns: 344px; column-gap: 14px; }
+.qgrid-inner > .qcard { break-inside: avoid; margin: 0 0 14px; }
+@media (max-width: 560px) { .qgrid-inner { columns: 1; } }
 
 /* ───────────────────────── Test card ───────────────────────── */
 .qcard {
@@ -426,58 +429,62 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .qcard:hover { border-color: var(--border-3); }
 .qcard.ok { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
 .qcard.fail { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
-.qcard.hidden-by-filter { display: none; }
 
-.qcard-head { display: flex; align-items: center; gap: 8px; padding: 13px 14px; flex-wrap: wrap; cursor: pointer; }
-.qcard-status { width: 8px; height: 8px; border-radius: 50%; background: var(--border-3); flex: none; }
+.qcard-head { display: flex; align-items: flex-start; gap: 8px; padding: 13px 14px; cursor: pointer; }
+.qcard-status { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--border-3); flex: none; }
 .qcard.ok .qcard-status { background: var(--success); }
 .qcard.fail .qcard-status { background: var(--danger); }
 .qcard.busy .qcard-status { background: var(--text-3); animation: pulse 1s infinite; }
 .tag { padding: 2px 8px; border-radius: var(--radius-xs); font-size: 12.5px; font-weight: 550; white-space: nowrap; background: var(--surface-3); color: var(--text-2); }
 .tag.subtle { background: transparent; color: var(--text-3); border: 1px solid var(--border); }
-.qcard-name { font-weight: 600; font-size: 16px; flex: 1; min-width: 0; }
-.qcard-actions { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.qcard-name { font-weight: 600; font-size: 15.5px; line-height: 1.35; flex: 1; min-width: 0; }
+.qcard-actions { display: flex; gap: 6px; align-items: center; margin-left: auto; flex: none; }
 .qcard-run { font-size: 14px; padding: 4px 13px; min-height: 30px; }
 .qcard-run:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .qcard-run.running { color: var(--text-3); }
 .qcard-expand { min-width: 30px; min-height: 30px; padding: 0; background: transparent; border-color: transparent; color: var(--text-3); }
 .qcard-expand:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 
-.qcard-desc { padding: 0 14px 10px; font-size: 15px; color: var(--text-3); line-height: 1.5; }
+.qcard-desc { padding: 0 14px 10px; font-size: 14px; color: var(--text-3); line-height: 1.5; }
 
-/* Observation point — always visible, compact, on the card. */
+/* Observation point — always visible, light left-accent, clamped to 3 lines
+   (full text lives in the detail drawer). */
 .qcard-details { min-width: 30px; min-height: 30px; padding: 0 10px; background: transparent; border-color: var(--border); color: var(--text-2); font-size: 13.5px; }
 .qcard-details:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .qcard-observe {
-  margin: 0 14px 12px; padding: 9px 11px; font-size: 14px; line-height: 1.5;
-  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); white-space: pre-wrap; word-break: break-word;
+  margin: 0 14px 12px; padding: 1px 0 1px 11px; font-size: 13.5px; line-height: 1.5;
+  color: var(--text-3); border-left: 2px solid var(--border-3); word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
-.qcard-observe .observe-tag { display: inline-block; margin-right: 6px; font-weight: 650; color: var(--text-3); font-size: 13px; }
+.qcard-observe .observe-tag { margin-right: 6px; font-weight: 650; color: var(--text-2); font-size: 12.5px; }
 
 /* Card manual-verdict accents (independent of transport ok/fail). */
 .qcard.verdict-pass { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); box-shadow: inset 3px 0 0 var(--success); }
 .qcard.verdict-fail { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); box-shadow: inset 3px 0 0 var(--danger); }
 
-.qcard-meta-row { display: none; flex-wrap: wrap; gap: 7px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
-.qcard.has-result .qcard-meta-row { display: flex; }
+/* Aggregate meta strip — only shown for multi-endpoint runs (single results carry
+   their own badges in the result row below, so this stays empty and hidden). */
+.qcard-meta-row { display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.qcard-meta-row:empty { display: none; }
 .badge { font-family: var(--mono); font-size: 13px; font-weight: 550; padding: 2px 8px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--text-2); }
 .badge.ok { background: var(--success-bg); color: var(--success); }
 .badge.fail { background: var(--danger-bg); color: var(--danger); }
 .badge.info { background: var(--surface-3); color: var(--text); }
 
-/* Compact per-result rows on the card (endpoint · model · badges · verdict). */
-.qcard-result { display: flex; flex-direction: column; gap: 8px; }
-.qcard-result:not(:empty) { padding: 11px 14px; border-top: 1px solid var(--border); }
-.result-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface); }
-.result-row.fail { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+/* Compact per-result rows on the card (endpoint · model · badges · verdict).
+   Borderless; multiple rows are split by a light divider instead of nested boxes. */
+.qcard-result { display: flex; flex-direction: column; }
+.qcard-result:not(:empty) { padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.result-row { padding: 7px 0; }
+.result-row:first-child { padding-top: 0; }
+.result-row:last-child { padding-bottom: 0; }
+.result-row + .result-row { border-top: 1px dashed var(--border); }
 .result-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.result-row-name { font-size: 15px; font-weight: 600; }
-.result-row-model { font-family: var(--mono); font-size: 13px; color: var(--text-3); }
+.result-row-name { font-size: 13.5px; font-weight: 650; }
+.result-row-model { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
 .result-row-badges { display: inline-flex; flex-wrap: wrap; gap: 5px; }
-.result-row-details { margin-left: auto; }
-.verdict { display: flex; gap: 6px; margin-top: 7px; }
-.verdict-btn { font-size: 14px; padding: 4px 13px; min-height: 30px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: var(--radius-xs); cursor: pointer; }
+.verdict { display: inline-flex; gap: 6px; margin-left: auto; }
+.verdict-btn { font-size: 12.5px; padding: 3px 10px; min-height: 27px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: var(--radius-xs); cursor: pointer; }
 .verdict-btn:hover { border-color: var(--text-3); color: var(--text); }
 .verdict-btn.pass.active { background: var(--success-bg); border-color: var(--success); color: var(--success); }
 .verdict-btn.fail.active { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }

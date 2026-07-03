@@ -72,13 +72,16 @@
       const pre = document.createElement('pre');
       pre.className = 'code';
       pre.innerHTML = Util.highlightJson(obj);
+      // Serialize once and close over the string, not the payload object, so the
+      // full JSON graph can be GC'd once the block is rendered.
+      const text = Util.jsonText(obj);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'copy-btn';
       btn.textContent = '复制';
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        Util.copyText(Util.jsonText(obj), btn);
+        Util.copyText(text, btn);
       });
       wrap.appendChild(btn);
       wrap.appendChild(pre);
@@ -1074,7 +1077,6 @@
       const card = document.createElement('div');
       card.className = 'qcard';
       card.dataset.qid = q.id;
-      card.dataset.category = q.category || '未分类';
       card.innerHTML = `
         <div class="qcard-head">
           <span class="qcard-status"></span>
@@ -1169,11 +1171,10 @@
       card.classList.remove('ok', 'fail');
       card.classList.add(anyFail ? 'fail' : 'ok', 'has-result');
 
-      // Card-level meta = transport aggregate across endpoints.
+      // Aggregate strip only for multi-endpoint runs; a single result carries its
+      // own badges in the row below, so the strip stays empty (and stays hidden).
       const meta = card.querySelector('.qcard-meta-row');
-      if (list.length === 1) {
-        meta.innerHTML = Cards.badgeRow(list[0].result);
-      } else {
+      if (list.length > 1) {
         const okN = list.filter((x) => x.result.ok).length;
         const cost = list.reduce((s, x) => s + Number(x.result.estimated_cost_usd || 0), 0);
         meta.innerHTML = [
@@ -1181,26 +1182,27 @@
           Util.badge(`${list.length} 组运行`),
           cost ? Util.badge(`$${Util.formatCost(cost)}`, 'info') : ''
         ].filter(Boolean).join('');
+      } else {
+        meta.innerHTML = '';
       }
 
       const host = card.querySelector('.qcard-result');
       host.innerHTML = '';
 
+      // One compact row per (endpoint × model): name · model · badges · verdict.
+      // The full request/response detail lives in the drawer (card-level 详情).
       for (const { endpoint, model, result } of list) {
         const key = Store.resultKey(card.dataset.qid, endpoint.id, model);
         const row = document.createElement('div');
         row.className = 'result-row ' + (result.ok ? 'ok' : 'fail');
         const modelTag = model ? `<span class="result-row-model">${Util.escapeHtml(model)}</span>` : '';
-        row.innerHTML =
-          `<div class="result-row-head">
-             <span class="result-row-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}
-             <span class="result-row-badges">${Cards.badgeRow(result)}</span>
-             <button type="button" class="result-row-details link-btn">详情</button>
-           </div>`;
-        row.appendChild(Cards.verdictControls(key, card));
-        row.querySelector('.result-row-details').addEventListener('click', (e) => {
-          e.stopPropagation(); Drawer.open(card, key);
-        });
+        const head = document.createElement('div');
+        head.className = 'result-row-head';
+        head.innerHTML =
+          `<span class="result-row-name">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>${modelTag}` +
+          `<span class="result-row-badges">${Cards.badgeRow(result)}</span>`;
+        head.appendChild(Cards.verdictControls(key, card));
+        row.appendChild(head);
         host.appendChild(row);
       }
       Cards.applyCardVerdict(card);
