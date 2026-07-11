@@ -269,9 +269,9 @@
       model: (modelId || '').trim() || Store.DEFAULTS[c.group].model,
       authMode: c.authMode || 'bearer',
       maxTokens: Number(c.maxTokens || 102400),
-      timeout: Number(c.timeout || 600000),
-      delay: Number(c.delay || 0),
-      system: c.system || '',
+      timeout: c.group === 'Image' ? 600000 : Number(c.timeout || 600000),
+      delay: c.group === 'Image' ? 0 : Number(c.delay || 0),
+      system: c.group === 'Image' ? '' : (c.system || ''),
       image: {
         n: Number(c.imageN || 1),
         quality: c.imageQuality || 'medium',
@@ -309,13 +309,12 @@
       $cfg.baseUrl.value = cfg.baseUrl || '';
       $cfg.apiKey.value = target ? (cfg.apiKey || '') : '';
       $cfg.authMode.value = cfg.authMode || 'bearer';
-      $cfg.maxTokens.value = cfg.maxTokens || 102400;
-      $cfg.timeout.value = cfg.timeout || 600000;
-      $cfg.delay.value = cfg.delay || 300;
-      $cfg.system.value = cfg.system || '';
-      $cfg.imageN.value = cfg.imageN || 1;
-      $cfg.imageQuality.value = cfg.imageQuality || 'medium';
-      $cfg.imageSize.value = cfg.imageSize || '1024x1024';
+      if (group !== 'Image') {
+        $cfg.maxTokens.value = cfg.maxTokens || 102400;
+        $cfg.timeout.value = cfg.timeout || 600000;
+        $cfg.delay.value = cfg.delay || 300;
+        $cfg.system.value = cfg.system || '';
+      }
       Util.el('view-endpoints').classList.toggle('is-image', group === 'Image');
       Util.el('delete-endpoint').hidden = !Store.editingId;
       // A saved endpoint keeps its detected models + enabled subset; a new form
@@ -333,21 +332,21 @@
     },
 
     readForm() {
-      return {
+      const form = {
         id: Store.editingId || undefined,
         group: Store.editingGroup,
         name: $cfg.name.value.trim(),
         baseUrl: $cfg.baseUrl.value.trim(),
         apiKey: $cfg.apiKey.value.trim(),
-        authMode: $cfg.authMode.value,
-        maxTokens: Number($cfg.maxTokens.value || 102400),
-        timeout: Number($cfg.timeout.value || 600000),
-        delay: Number($cfg.delay.value || 0),
-        system: $cfg.system.value,
-        imageN: Number($cfg.imageN.value || 1),
-        imageQuality: $cfg.imageQuality.value,
-        imageSize: $cfg.imageSize.value.trim() || '1024x1024'
+        authMode: $cfg.authMode.value
       };
+      if (Store.editingGroup !== 'Image') {
+        form.maxTokens = Number($cfg.maxTokens.value || 102400);
+        form.timeout = Number($cfg.timeout.value || 600000);
+        form.delay = Number($cfg.delay.value || 0);
+        form.system = $cfg.system.value;
+      }
+      return form;
     },
 
     async save() {
@@ -1868,10 +1867,7 @@
       maxTokens: Util.el('cfg-maxTokens'),
       timeout: Util.el('cfg-timeout'),
       delay: Util.el('cfg-delay'),
-      system: Util.el('cfg-system'),
-      imageN: Util.el('cfg-image-n'),
-      imageQuality: Util.el('cfg-image-quality'),
-      imageSize: Util.el('cfg-image-size')
+      system: Util.el('cfg-system')
     };
 
     buildGroupNav();

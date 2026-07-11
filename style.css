@@ -279,8 +279,7 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 }
 .field select, .tests-actions select { cursor: pointer; }
 .field select:disabled { cursor: not-allowed; color: var(--muted); opacity: 0.75; }
-.image-only { display: none; }
-#view-endpoints.is-image .image-only { display: flex; }
+#view-endpoints.is-image .text-endpoint-option { display: none; }
 
 .checkbox-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; font-size: 14.5px; color: var(--text-2); cursor: pointer; }
 
