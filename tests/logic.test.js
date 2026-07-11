@@ -86,7 +86,7 @@ assert.equal(counts.OpenAI, 4);
 assert.equal(counts.Anthropic, 25);
 assert.equal(counts.Google, 4);
 assert.equal(counts.Sakana, 4);
-assert.equal(counts.Image, 30);
+assert.equal(counts.Image, 29);
 assert.deepEqual(
   [...new Set(QUESTIONS.filter((q) => q.group === 'Image').map((q) => q.category))],
   ['回图能力', 'Quality × Size 矩阵', 'n 多图与耗时']
@@ -138,7 +138,7 @@ assert.deepEqual(
 assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format === 'url'));
 
 const nQuestions = QUESTIONS.filter((q) => q.category === 'n 多图与耗时');
-assert.deepEqual(nQuestions.map((q) => q.image.n), [1, 2, 4, 8]);
+assert.deepEqual(nQuestions.map((q) => q.image.n), [2, 4, 8]);
 assert(nQuestions.every((q) =>
   q.image.quality === 'low' && q.image.size === '1024x1024' && q.image.response_format === 'url'
 ));

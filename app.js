@@ -167,7 +167,7 @@
       Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
       Google: '面向 Gemini models/*:generateContent 的质量探测。',
       Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
-      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、3×8 官方尺寸矩阵，以及 n=1/2/4/8 的多图耗时。'
+      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、3×8 官方尺寸矩阵，以及 n=2/4/8 的多图耗时。'
     },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
@@ -1060,8 +1060,7 @@
         const head = document.createElement('div');
         head.className = 'qsection-head';
         head.innerHTML = `<h3 class="qsection-title">${Util.escapeHtml(cat)}</h3>` +
-          `<span class="qsection-count">${items.length}</span>` +
-          (isImageMatrix ? '<span class="qsection-note">3 qualities × 8 documented size presets</span>' : '');
+          `<span class="qsection-count">${items.length}</span>`;
         let inner;
         if (isImageMatrix) {
           inner = Cards.buildImageMatrix(items);
@@ -1131,16 +1130,6 @@
 
       const figure = document.createElement('div');
       figure.className = 'sci-matrix-figure';
-      const caption = document.createElement('div');
-      caption.className = 'sci-matrix-caption';
-      caption.innerHTML = `
-        <span class="sci-figure-no">FIG. 1</span>
-        <div class="sci-caption-copy">
-          <strong>Image-generation output parameter space</strong>
-          <span>Each cell is one independent URL-return probe using an identical prompt and <em>n</em> = 1.</span>
-        </div>
-        <div class="sci-legend"><i class="ok"></i> pass <i class="fail"></i> fail <i class="experimental"></i> experimental</div>`;
-      figure.appendChild(caption);
 
       const scroller = document.createElement('div');
       scroller.className = 'sci-matrix-scroll';
@@ -1153,7 +1142,7 @@
       const corner = document.createElement('div');
       corner.className = 'sci-matrix-corner';
       corner.setAttribute('role', 'columnheader');
-      corner.innerHTML = '<span>QUALITY ↓</span><span>SIZE →</span>';
+      corner.textContent = 'QUALITY / SIZE';
       matrix.appendChild(corner);
 
       for (const size of sizes) {
@@ -1162,11 +1151,8 @@
         head.setAttribute('role', 'columnheader');
         const display = size.value === 'auto' ? 'AUTO' : String(size.value).replace('x', ' × ');
         head.innerHTML = `
-          <span class="sci-size-tier">${Util.escapeHtml(size.tier || '')}</span>
           <strong>${Util.escapeHtml(display)}</strong>
-          <span>${Util.escapeHtml(size.label || '')}</span>
-          <small>${Util.escapeHtml(size.aspect || '')} · ${Util.escapeHtml(size.pixels || '')}</small>
-          ${size.experimental ? '<em>EXP.</em>' : ''}`;
+          <small>${Util.escapeHtml(size.tier || '')}${size.aspect ? ` · ${Util.escapeHtml(size.aspect)}` : ''}${size.experimental ? ' · EXP' : ''}</small>`;
         matrix.appendChild(head);
       }
 
@@ -1175,7 +1161,7 @@
         const rowHead = document.createElement('div');
         rowHead.className = 'sci-quality-head';
         rowHead.setAttribute('role', 'rowheader');
-        rowHead.innerHTML = `<b>${Util.escapeHtml(meta.code)}</b><strong>${Util.escapeHtml(meta.label)}</strong><span>${Util.escapeHtml(meta.note)}</span>`;
+        rowHead.innerHTML = `<strong>${Util.escapeHtml(meta.label)}</strong>`;
         matrix.appendChild(rowHead);
         for (const size of sizes) {
           const q = items.find((item) => item.image && item.image.quality === quality && item.image.size === size.value);
@@ -1187,8 +1173,7 @@
       figure.appendChild(scroller);
       const foot = document.createElement('div');
       foot.className = 'sci-matrix-footnote';
-      foot.innerHTML = '<sup>a</sup> Sizes are the complete documented preset list; arbitrary multiples-of-16 are also accepted within model constraints. ' +
-        '<sup>b</sup> Outputs above 3,686,400 pixels are marked experimental. Total API latency is recorded per cell.';
+      foot.textContent = 'EXP denotes resolutions above 3,686,400 pixels. Arbitrary valid multiples-of-16 are supported beyond these documented presets.';
       figure.appendChild(foot);
       return figure;
     },
@@ -1199,18 +1184,15 @@
       card.dataset.qid = q.id;
       card.setAttribute('role', 'gridcell');
       card.setAttribute('aria-label', `${q.image.quality} quality, ${q.image.size} size`);
-      const experimental = q.matrix && q.matrix.experimental;
       card.innerHTML = `
         <div class="matrix-cell-toolbar">
           <span class="qcard-status"></span>
-          <span class="matrix-cell-code">${Util.escapeHtml(String(q.image.quality).slice(0, 1).toUpperCase())}·${Util.escapeHtml(q.matrix && q.matrix.tier || '')}</span>
-          ${experimental ? '<span class="matrix-cell-exp">EXP.</span>' : ''}
           <div class="qcard-actions">
             <button type="button" class="qcard-run">Run</button>
-            <button type="button" class="qcard-details" aria-label="详情">Data</button>
+            <button type="button" class="qcard-details" aria-label="详情">View</button>
           </div>
         </div>
-        <div class="matrix-cell-empty"><span>URL · n=1</span><small>awaiting observation</small></div>
+        <div class="matrix-cell-empty"><span>—</span></div>
         <div class="qcard-meta-row"></div>
         <div class="qcard-result"></div>`;
       Cards.wireCard(card, q);
@@ -1267,7 +1249,16 @@
       if (!images.length) return null;
       const gallery = document.createElement('div');
       gallery.className = `image-gallery${compact ? ' compact' : ''}`;
-      for (const image of images) {
+      const requestedN = Number(result && result.image_probe && result.image_probe.requested_n || images.length);
+      if ([2, 4, 8].includes(requestedN)) gallery.classList.add(`image-mosaic-${requestedN}`);
+      for (let listIndex = 0; listIndex < images.length; listIndex++) {
+        if (requestedN === 8 && listIndex === 4) {
+          const hole = document.createElement('figure');
+          hole.className = 'image-tile mosaic-hole';
+          hole.setAttribute('aria-hidden', 'true');
+          gallery.appendChild(hole);
+        }
+        const image = images[listIndex];
         const src = String(image && image.src || '');
         if (!/^https?:\/\//i.test(src) && !/^data:image\/(?:png|jpe?g|webp);base64,/i.test(src)) continue;
         const tile = document.createElement('figure');
@@ -1342,6 +1333,9 @@
 
     // A finished result row: name · model · badges · verdict.
     buildResultRow(card, key, endpoint, model, result) {
+      if (card.classList.contains('matrix-cell')) {
+        return Cards.buildMatrixResultRow(key, endpoint, model, result);
+      }
       const row = document.createElement('div');
       row.className = 'result-row ' + (result.ok ? 'ok' : 'fail');
       row.dataset.key = key;
@@ -1351,6 +1345,35 @@
         `<span class="result-row-badges">${Cards.badgeRow(result)}</span>`;
       head.appendChild(Cards.verdictControls(key, card));
       row.appendChild(head);
+      const gallery = Cards.imageGallery(result, true);
+      if (gallery) row.appendChild(gallery);
+      return row;
+    },
+
+    buildMatrixResultRow(key, endpoint, model, result) {
+      const row = document.createElement('div');
+      row.className = 'result-row matrix-result ' + (result.ok ? 'ok' : 'fail');
+      row.dataset.key = key;
+      const head = document.createElement('div');
+      head.className = 'matrix-result-head';
+      head.innerHTML = `
+        <span title="${Util.escapeAttr(model || '')}">${Util.escapeHtml(endpoint.name || endpoint.group)}</span>
+        <b class="${result.ok ? 'ok' : 'fail'}">${result.ok ? 'PASS' : 'FAIL'}</b>`;
+      row.appendChild(head);
+      const metrics = document.createElement('div');
+      metrics.className = 'matrix-result-metrics';
+      metrics.innerHTML = [
+        result.elapsed_ms != null ? `<span>${Util.escapeHtml(result.elapsed_ms)} ms</span>` : '',
+        result.estimated_cost_usd != null ? `<span>$${Util.formatCost(result.estimated_cost_usd)}</span>` : '',
+        result.response_status ? `<span>HTTP ${Util.escapeHtml(result.response_status)}</span>` : ''
+      ].filter(Boolean).join('');
+      row.appendChild(metrics);
+      if (result.error_message) {
+        const error = document.createElement('div');
+        error.className = 'matrix-result-error';
+        error.textContent = result.error_message;
+        row.appendChild(error);
+      }
       const gallery = Cards.imageGallery(result, true);
       if (gallery) row.appendChild(gallery);
       return row;
@@ -1715,7 +1738,7 @@
 
       // Image probes have semantic stages: return capability must finish before
       // the quality×size matrix, and the matrix must finish before n scaling.
-      // n=1/2/4/8 runs serially so their elapsed times are not contaminated by
+      // n=2/4/8 runs serially so their elapsed times are not contaminated by
       // another n probe. Other groups retain their original concurrency.
       const phases = Store.activeGroup === 'Image'
         ? [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>

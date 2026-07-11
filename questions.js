@@ -580,7 +580,7 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
   }))
 );
 
-const IMAGE_N_QUESTIONS = [1, 2, 4, 8].map((n) => ({
+const IMAGE_N_QUESTIONS = [2, 4, 8].map((n) => ({
   id: `image-n-${n}`,
   group: 'Image',
   provider: 'openai',
@@ -590,7 +590,7 @@ const IMAGE_N_QUESTIONS = [1, 2, 4, 8].map((n) => ({
   description: `单次请求生成 ${n} 张 1K low 图片`,
   prompt: 'A minimal geometric app icon for an AI model quality dashboard, black, white, and electric blue, no text. Create distinct visual variations.',
   image: { n, quality: 'low', size: '1024x1024', response_format: 'url' },
-  observe: `通过条件：返回 ${n} 张 URL 图片；记录请求总耗时和平均每张耗时。`
+  observe: `通过条件：返回 ${n} 张 URL 图片；记录请求总耗时和平均每张耗时。展示为${n === 2 ? '二宫格' : n === 4 ? '四宫格' : '九宫格（中央留空）'}。`
 }));
 
 const IMAGE_QUESTIONS = [
