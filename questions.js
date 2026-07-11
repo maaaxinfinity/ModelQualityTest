@@ -529,6 +529,7 @@ const IMAGE_RETURN_QUESTIONS = [
     id: 'image-return-b64',
     group: 'Image',
     provider: 'openai',
+    model: 'gpt-image-2',
     endpoint_type: 'openai_images',
     category: '回图能力',
     name: 'Base64 回图',
@@ -541,6 +542,7 @@ const IMAGE_RETURN_QUESTIONS = [
     id: 'image-return-url',
     group: 'Image',
     provider: 'openai',
+    model: 'gpt-image-2',
     endpoint_type: 'openai_images',
     category: '回图能力',
     name: 'URL 回图',
@@ -548,6 +550,90 @@ const IMAGE_RETURN_QUESTIONS = [
     prompt: IMAGE_MATRIX_PROMPT,
     image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
     observe: '通过条件：HTTP 成功、返回 1 个图片 URL 且前端可显示。URL 可能具有有效期。'
+  }
+];
+
+const IMAGE_EDIT_FIXTURES = {
+  scene: { file: 'scene-b.png', label: 'Image 1 · 场景 B', role: 'edit target' },
+  fox: { file: 'object-fox.png', label: 'Image 2 · 红狐 A', role: 'reference object' },
+  orb: { file: 'object-orb.png', label: 'Image 3 · 蓝玻璃球', role: 'reference object' },
+  rocket: { file: 'object-rocket.png', label: 'Image 4 · 黄火箭', role: 'reference object' },
+  cactus: { file: 'object-cactus.png', label: 'Image 5 · 仙人掌', role: 'reference object' },
+  robot: { file: 'object-robot.png', label: 'Image 6 · 紫机器人', role: 'reference object' },
+  compass: { file: 'object-compass.png', label: 'Image 7 · 黄铜罗盘', role: 'reference object' },
+  mug: { file: 'object-mug.png', label: 'Image 8 · 条纹杯', role: 'reference object' }
+};
+
+const IMAGE_EDIT_QUESTIONS = [
+  {
+    id: 'image-edit-input-1',
+    group: 'Image',
+    provider: 'openai',
+    model: 'gpt-image-2',
+    endpoint_type: 'openai_image_edits',
+    category: 'Edit 多图输入',
+    name: 'Edit · 1 张输入',
+    description: '单图编辑：把场景左侧已有盆栽移动到桌面中央，并保持其余场景不变',
+    prompt: 'Image 1 is the edit target. Move the existing potted plant from the far-left corner of the tabletop to the exact center of the empty tabletop. Remove it from its original position so the plant appears exactly once. Preserve the camera, wall, table geometry, two books, black desk lamp, and flat editorial illustration style. Do not replace or redesign the scene; change only the plant position.',
+    edit_inputs: [IMAGE_EDIT_FIXTURES.scene],
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
+    observe: '真 Edit 条件：盆栽从原位置移到中央且只出现一次；桌面、书本、台灯和取景保持一致。记录 1 张输入的总耗时。'
+  },
+  {
+    id: 'image-edit-input-2',
+    group: 'Image',
+    provider: 'openai',
+    model: 'gpt-image-2',
+    endpoint_type: 'openai_image_edits',
+    category: 'Edit 多图输入',
+    name: 'Edit · 2 张输入',
+    description: 'A → B 合成：把 Image 2 的红狐放到 Image 1 的空桌面中央',
+    prompt: 'Image 1 is the edit target scene B. Image 2 is the reference object A. Insert the exact vermilion-red ceramic fox from Image 2 at the center of the empty tabletop in Image 1, matching the scene perspective, lighting, and flat editorial illustration style. Show the fox exactly once. Preserve Image 1 camera, wall, table, plant, books, and lamp unchanged. Do not generate a new room.',
+    edit_inputs: [IMAGE_EDIT_FIXTURES.scene, IMAGE_EDIT_FIXTURES.fox],
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
+    observe: '真 Edit 条件：红狐的颜色和轮廓来自 A 图并进入 B 图中央，同时 B 图边缘锚点保持不变。记录 2 张输入的总耗时。'
+  },
+  {
+    id: 'image-edit-input-4',
+    group: 'Image',
+    provider: 'openai',
+    model: 'gpt-image-2',
+    endpoint_type: 'openai_image_edits',
+    category: 'Edit 多图输入',
+    name: 'Edit · 4 张输入',
+    description: '以场景 B 为底图，把 3 个参考物按指定顺序合成到桌面',
+    prompt: 'Image 1 is the unchanged edit target scene. Images 2, 3, and 4 are reference objects: the red fox, blue glass orb, and yellow rocket. Place all three exactly once on the empty center of the tabletop, ordered left-to-right as fox, orb, rocket. Match scale, perspective, scene lighting, and the flat editorial illustration style of the inputs. Preserve the original plant at far left and the books and lamp at far right. Do not omit, duplicate, recolor, or substitute any reference object.',
+    edit_inputs: [
+      IMAGE_EDIT_FIXTURES.scene,
+      IMAGE_EDIT_FIXTURES.fox,
+      IMAGE_EDIT_FIXTURES.orb,
+      IMAGE_EDIT_FIXTURES.rocket
+    ],
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
+    observe: '真 Edit 条件：红狐、蓝球、黄火箭各出现一次且顺序正确，底图取景与已有物体保持一致。记录 4 张输入的总耗时。'
+  },
+  {
+    id: 'image-edit-input-8',
+    group: 'Image',
+    provider: 'openai',
+    model: 'gpt-image-2',
+    endpoint_type: 'openai_image_edits',
+    category: 'Edit 多图输入',
+    name: 'Edit · 8 张输入',
+    description: '以场景 B 为底图，完整合成 7 个不同参考物，检查遗漏与串图',
+    prompt: 'Image 1 is the unchanged edit target scene. Images 2 through 8 are seven distinct reference objects: red fox, blue glass orb, yellow rocket, potted cactus, purple robot, brass compass, and black-and-white mug. Place every reference object exactly once in two tidy shallow rows across the empty center of the tabletop, scaled so all seven remain clearly visible. Preserve each object color, silhouette, and the flat editorial illustration style of the inputs. Preserve Image 1 camera, wall, table, original plant, books, and lamp. Do not omit, duplicate, merge, recolor, or substitute any object, and do not generate a new room.',
+    edit_inputs: [
+      IMAGE_EDIT_FIXTURES.scene,
+      IMAGE_EDIT_FIXTURES.fox,
+      IMAGE_EDIT_FIXTURES.orb,
+      IMAGE_EDIT_FIXTURES.rocket,
+      IMAGE_EDIT_FIXTURES.cactus,
+      IMAGE_EDIT_FIXTURES.robot,
+      IMAGE_EDIT_FIXTURES.compass,
+      IMAGE_EDIT_FIXTURES.mug
+    ],
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
+    observe: '真 Edit 条件：7 个参考物均出现且无重复/串色，底图取景和左右锚点保持一致。记录 8 张输入的总耗时。'
   }
 ];
 
@@ -568,6 +654,7 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
     id: `image-matrix-${quality}-${size.id}`,
     group: 'Image',
     provider: 'openai',
+    model: 'gpt-image-2',
     endpoint_type: 'openai_images',
     category: 'Quality × Size 矩阵',
     name: `${quality} · ${size.value}`,
@@ -576,7 +663,8 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
     image: { n: 1, quality, size: size.value, response_format: 'url' },
     matrix: { quality, size: size.value, ...size },
     layout: 'image-matrix',
-    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本。'
+    validate: { size: true },
+    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本；显式尺寸必须与返回图片实际像素完全一致，auto 校验合法像素约束。'
   }))
 );
 
@@ -584,6 +672,7 @@ const IMAGE_N_QUESTIONS = [2, 4, 8].map((n) => ({
   id: `image-n-${n}`,
   group: 'Image',
   provider: 'openai',
+  model: 'gpt-image-2',
   endpoint_type: 'openai_images',
   category: 'n 多图与耗时',
   name: `n=${n}`,
@@ -595,6 +684,7 @@ const IMAGE_N_QUESTIONS = [2, 4, 8].map((n) => ({
 
 const IMAGE_QUESTIONS = [
   ...IMAGE_RETURN_QUESTIONS,
+  ...IMAGE_EDIT_QUESTIONS,
   ...IMAGE_MATRIX_QUESTIONS,
   ...IMAGE_N_QUESTIONS
 ];

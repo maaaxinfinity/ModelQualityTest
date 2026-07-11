@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 global.window = global;
 require('../questions.js');
@@ -8,6 +10,7 @@ const {
   buildModelsRequest,
   extractImageArtifacts,
   extractModelIds,
+  parseImageDimensions,
   sanitizePayload,
   summarizeImageProbe
 } = require('../api/_lib/providers');
@@ -86,11 +89,12 @@ assert.equal(counts.OpenAI, 4);
 assert.equal(counts.Anthropic, 25);
 assert.equal(counts.Google, 4);
 assert.equal(counts.Sakana, 4);
-assert.equal(counts.Image, 29);
+assert.equal(counts.Image, 33);
 assert.deepEqual(
   [...new Set(QUESTIONS.filter((q) => q.group === 'Image').map((q) => q.category))],
-  ['回图能力', 'Quality × Size 矩阵', 'n 多图与耗时']
+  ['回图能力', 'Edit 多图输入', 'Quality × Size 矩阵', 'n 多图与耗时']
 );
+assert(QUESTIONS.filter((q) => q.group === 'Image').every((q) => q.model === 'gpt-image-2'));
 
 const endpointTypes = {};
 for (const group of Object.keys(counts)) {
@@ -123,6 +127,26 @@ const imageReturnUrl = QUESTIONS.find((q) => q.id === 'image-return-url');
 assert.equal(buildUpstreamRequest(imageReturnB64, cfgFor('Image')).body.response_format, 'b64_json');
 assert.equal(buildUpstreamRequest(imageReturnUrl, cfgFor('Image')).body.response_format, 'url');
 
+const editQuestions = QUESTIONS.filter((q) => q.category === 'Edit 多图输入');
+assert.deepEqual(editQuestions.map((q) => q.edit_inputs.length), [1, 2, 4, 8]);
+assert(editQuestions.every((q) =>
+  q.endpoint_type === 'openai_image_edits' && q.image.n === 1 &&
+  q.image.quality === 'low' && q.image.size === '1024x1024' && q.image.response_format === 'url'
+));
+for (const q of editQuestions) {
+  const request = buildUpstreamRequest(q, cfgFor('Image'));
+  assert.equal(request.endpoint, 'https://api.openai.com/v1/images/edits');
+  assert.equal(request.endpointType, 'openai_image_edits');
+  assert.equal(request.body.model, 'gpt-image-2');
+  assert.equal(request.body.input_image_count, q.edit_inputs.length);
+  assert.equal(request.body.input_images.length, q.edit_inputs.length);
+  assert.equal(request.body.input_fidelity, undefined);
+  assert.equal(request.headers['Content-Type'], undefined, 'multipart boundary must be set by fetch');
+  const entries = [...request.formData.entries()];
+  assert.equal(entries.filter(([key]) => key === 'image[]').length, q.edit_inputs.length);
+  assert(entries.filter(([key]) => key === 'image[]').every(([, file]) => file instanceof Blob && file.size > 0));
+}
+
 const matrixQuestions = QUESTIONS.filter((q) => q.category === 'Quality × Size 矩阵');
 const expectedImageSizes = [
   '1024x1024', '1536x1024', '1024x1536', '2048x2048',
@@ -136,6 +160,7 @@ assert.deepEqual(
   ['low', 'medium', 'high'].flatMap((quality) => expectedImageSizes.map((size) => `${quality}:${size}`))
 );
 assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format === 'url'));
+assert(matrixQuestions.every((q) => q.validate && q.validate.size === true));
 
 const nQuestions = QUESTIONS.filter((q) => q.category === 'n 多图与耗时');
 assert.deepEqual(nQuestions.map((q) => q.image.n), [2, 4, 8]);
@@ -164,6 +189,43 @@ assert.equal(urlProbe.probe.ms_per_image, 1200);
 const badProbe = summarizeImageProbe(extractedUrl, { n: 2, response_format: 'b64_json' }, 1200);
 assert.match(badProbe.error, /expected 2 image/);
 assert.match(badProbe.error, /expected response_format=b64_json/);
+
+const fixtureDimensions = parseImageDimensions(fs.readFileSync(path.join(__dirname, '..', 'assets', 'image-edit', 'scene-b.png')));
+assert.deepEqual(fixtureDimensions, { width: 1024, height: 1024, mime_type: 'image/png' });
+const jpegHeader = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x02, 0x00, 0x03, 0x01, 0x01, 0x11, 0x00]);
+assert.deepEqual(parseImageDimensions(jpegHeader), { width: 3, height: 2, mime_type: 'image/jpeg' });
+const webpHeader = Buffer.alloc(30);
+webpHeader.write('RIFF', 0, 'ascii');
+webpHeader.writeUInt32LE(22, 4);
+webpHeader.write('WEBP', 8, 'ascii');
+webpHeader.write('VP8X', 12, 'ascii');
+webpHeader.writeUInt32LE(10, 16);
+webpHeader.writeUIntLE(639, 24, 3);
+webpHeader.writeUIntLE(479, 27, 3);
+assert.deepEqual(parseImageDimensions(webpHeader), { width: 640, height: 480, mime_type: 'image/webp' });
+const sizedImage = [{ response_format: 'url', src: 'https://images.example.test/1.png', width: 1536, height: 1024 }];
+const exactSizeProbe = summarizeImageProbe(sizedImage, {
+  n: 1,
+  size: '1536x1024',
+  response_format: 'url'
+}, 900, { validateSize: true, dimensionProbeMs: 80 });
+assert.equal(exactSizeProbe.error, null);
+assert.equal(exactSizeProbe.probe.size_ok, true);
+assert.deepEqual(exactSizeProbe.probe.actual_sizes, ['1536x1024']);
+assert.equal(exactSizeProbe.probe.dimension_probe_ms, 80);
+const wrongSizeProbe = summarizeImageProbe(sizedImage, {
+  n: 1,
+  size: '1024x1024',
+  response_format: 'url'
+}, 900, { validateSize: true });
+assert.equal(wrongSizeProbe.probe.size_ok, false);
+assert.match(wrongSizeProbe.error, /expected size=1024x1024, received 1536x1024/);
+const autoSizeProbe = summarizeImageProbe(sizedImage, {
+  n: 1,
+  size: 'auto',
+  response_format: 'url'
+}, 900, { validateSize: true });
+assert.equal(autoSizeProbe.probe.size_ok, true);
 
 const sakanaRequest = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'sakana-fugu-basic'), cfgFor('Sakana'));
 assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');

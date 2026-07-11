@@ -1,3 +1,8 @@
+const dns = require('node:dns').promises;
+const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+
 const DEFAULTS = {
   OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', endpointType: 'openai_responses' },
   Anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-opus-4.8', endpointType: 'anthropic_messages' },
@@ -203,12 +208,85 @@ function buildImage(question, cfg) {
   return { endpoint, method: 'POST', headers, body, modelId: body.model, endpointType: 'openai_images' };
 }
 
+const IMAGE_EDIT_ASSET_DIR = path.join(process.cwd(), 'assets', 'image-edit');
+
+function imageEditAsset(input, index) {
+  const file = String(input && input.file || '').trim();
+  if (!/^[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp)$/i.test(file)) {
+    throw new Error(`invalid image edit fixture at input ${index + 1}`);
+  }
+  const filePath = path.join(IMAGE_EDIT_ASSET_DIR, file);
+  if (!filePath.startsWith(`${IMAGE_EDIT_ASSET_DIR}${path.sep}`) || !fs.existsSync(filePath)) {
+    throw new Error(`image edit fixture not found: ${file}`);
+  }
+  const ext = path.extname(file).toLowerCase();
+  const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : `image/${ext.slice(1)}`;
+  return {
+    file,
+    filePath,
+    mimeType,
+    label: String(input.label || `Image ${index + 1}`),
+    role: String(input.role || (index === 0 ? 'edit target' : 'reference object'))
+  };
+}
+
+function buildImageEdit(question, cfg) {
+  const baseUrl = cfg.baseUrl || DEFAULTS.Image.baseUrl;
+  const endpoint = withV1(baseUrl, 'images/edits');
+  const image = Object.assign({}, cfg.image || {}, question.image || {});
+  const rawInputs = Array.isArray(question.edit_inputs) ? question.edit_inputs : [];
+  if (!rawInputs.length || rawInputs.length > 16) {
+    throw new Error('image edits require between 1 and 16 input images');
+  }
+  const inputs = rawInputs.map(imageEditAsset);
+  const body = {
+    model: question.model || cfg.model || DEFAULTS.Image.model,
+    prompt: questionText(question),
+    n: image.n || question.n || 1,
+    quality: image.quality || question.quality || 'medium',
+    size: image.size || question.size || '1024x1024',
+    input_image_count: inputs.length,
+    input_images: inputs.map((input, index) => ({
+      index: index + 1,
+      file: input.file,
+      label: input.label,
+      role: input.role
+    }))
+  };
+  if (image.background) body.background = image.background;
+  if (image.moderation) body.moderation = image.moderation;
+  if (image.output_compression) body.output_compression = Number(image.output_compression);
+  if (image.output_format) body.output_format = image.output_format;
+  if (image.response_format) body.response_format = image.response_format;
+
+  const formData = new FormData();
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'input_image_count' || key === 'input_images') continue;
+    formData.append(key, String(value));
+  }
+  for (const input of inputs) {
+    const bytes = fs.readFileSync(input.filePath);
+    formData.append('image[]', new Blob([bytes], { type: input.mimeType }), input.file);
+  }
+  const headers = { Authorization: `Bearer ${cfg.apiKey}` };
+  return {
+    endpoint,
+    method: 'POST',
+    headers,
+    body,
+    formData,
+    modelId: body.model,
+    endpointType: 'openai_image_edits'
+  };
+}
+
 function buildUpstreamRequest(question, cfg) {
   const groupName = normalizeGroup(question.group || cfg.group);
   if (!cfg.apiKey) throw new Error('apiKey is required');
   if (groupName === 'Anthropic') return buildAnthropic(question, cfg);
   if (groupName === 'Google') return buildGoogle(question, cfg);
   if (groupName === 'Sakana') return buildOpenAIResponses(question, cfg, 'Sakana');
+  if (groupName === 'Image' && question.endpoint_type === 'openai_image_edits') return buildImageEdit(question, cfg);
   if (groupName === 'Image') return buildImage(question, cfg);
   return buildOpenAIResponses(question, cfg, 'OpenAI');
 }
@@ -338,14 +416,186 @@ function extractImageArtifacts(body, requestBody) {
   return artifacts;
 }
 
-function summarizeImageProbe(images, requestBody, elapsedMs) {
+function parseImageDimensions(value) {
+  const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value || []);
+  if (buffer.length >= 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20), mime_type: 'image/png' };
+  }
+
+  if (buffer.length >= 12 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    const sofMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    let offset = 2;
+    while (offset + 4 <= buffer.length) {
+      if (buffer[offset] !== 0xff) { offset++; continue; }
+      while (offset < buffer.length && buffer[offset] === 0xff) offset++;
+      const marker = buffer[offset++];
+      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (marker === 0xda || offset + 2 > buffer.length) break;
+      const length = buffer.readUInt16BE(offset);
+      if (length < 2 || offset + length > buffer.length) break;
+      if (sofMarkers.has(marker) && length >= 7) {
+        return {
+          width: buffer.readUInt16BE(offset + 5),
+          height: buffer.readUInt16BE(offset + 3),
+          mime_type: 'image/jpeg'
+        };
+      }
+      offset += length;
+    }
+  }
+
+  if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    let offset = 12;
+    while (offset + 8 <= buffer.length) {
+      const chunk = buffer.toString('ascii', offset, offset + 4);
+      const length = buffer.readUInt32LE(offset + 4);
+      const data = offset + 8;
+      if (data + length > buffer.length) break;
+      if (chunk === 'VP8X' && length >= 10) {
+        return {
+          width: 1 + buffer.readUIntLE(data + 4, 3),
+          height: 1 + buffer.readUIntLE(data + 7, 3),
+          mime_type: 'image/webp'
+        };
+      }
+      if (chunk === 'VP8L' && length >= 5 && buffer[data] === 0x2f) {
+        const b1 = buffer[data + 1];
+        const b2 = buffer[data + 2];
+        const b3 = buffer[data + 3];
+        const b4 = buffer[data + 4];
+        return {
+          width: 1 + (((b2 & 0x3f) << 8) | b1),
+          height: 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6)),
+          mime_type: 'image/webp'
+        };
+      }
+      if (chunk === 'VP8 ' && length >= 10 &&
+          buffer[data + 3] === 0x9d && buffer[data + 4] === 0x01 && buffer[data + 5] === 0x2a) {
+        return {
+          width: buffer.readUInt16LE(data + 6) & 0x3fff,
+          height: buffer.readUInt16LE(data + 8) & 0x3fff,
+          mime_type: 'image/webp'
+        };
+      }
+      offset = data + length + (length % 2);
+    }
+  }
+  return null;
+}
+
+function isPrivateIp(address) {
+  if (net.isIPv4(address)) {
+    const [a, b] = address.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+  }
+  if (net.isIPv6(address)) {
+    const value = address.toLowerCase();
+    if (value.startsWith('::ffff:')) return isPrivateIp(value.slice(7));
+    return value === '::' || value === '::1' || value.startsWith('fc') || value.startsWith('fd') ||
+      /^fe[89ab]/.test(value) || value.startsWith('ff');
+  }
+  return true;
+}
+
+async function assertPublicImageUrl(rawUrl) {
+  const parsed = new URL(rawUrl);
+  if (parsed.protocol !== 'https:') throw new Error('dimension probe only permits HTTPS image URLs');
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
+    throw new Error('dimension probe rejected a private image host');
+  }
+  const addresses = net.isIP(hostname)
+    ? [{ address: hostname }]
+    : await dns.lookup(hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((item) => isPrivateIp(item.address))) {
+    throw new Error('dimension probe rejected a private image address');
+  }
+  return parsed;
+}
+
+async function fetchImageBytes(rawUrl, timeoutMs = 30000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  let current = rawUrl;
+  try {
+    for (let redirects = 0; redirects <= 4; redirects++) {
+      const parsed = await assertPublicImageUrl(current);
+      const response = await fetch(parsed, {
+        headers: { Accept: 'image/png,image/jpeg,image/webp,image/*;q=0.8' },
+        redirect: 'manual',
+        signal: ctl.signal
+      });
+      if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+        current = new URL(response.headers.get('location'), parsed).toString();
+        continue;
+      }
+      if (!response.ok) throw new Error(`image download returned HTTP ${response.status}`);
+      const declared = Number(response.headers.get('content-length') || 0);
+      if (declared > 64 * 1024 * 1024) throw new Error('image exceeds 64 MB dimension probe limit');
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > 64 * 1024 * 1024) throw new Error('image exceeds 64 MB dimension probe limit');
+      return buffer;
+    }
+    throw new Error('image URL redirected too many times');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function inspectImageDimensions(images) {
+  const artifacts = Array.isArray(images) ? images : [];
+  await Promise.all(artifacts.map(async (image) => {
+    try {
+      let bytes;
+      if (image.response_format === 'b64_json') {
+        const match = String(image.src || '').match(/^data:image\/(?:png|jpe?g|webp);base64,([\s\S]+)$/i);
+        if (!match) throw new Error('invalid base64 image payload');
+        bytes = Buffer.from(match[1], 'base64');
+      } else {
+        bytes = await fetchImageBytes(image.src);
+      }
+      const dimensions = parseImageDimensions(bytes);
+      if (!dimensions || !dimensions.width || !dimensions.height) throw new Error('unsupported or malformed image bytes');
+      image.width = dimensions.width;
+      image.height = dimensions.height;
+      image.mime_type = image.mime_type || dimensions.mime_type;
+    } catch (error) {
+      image.dimension_error = error && error.message ? error.message : String(error);
+    }
+  }));
+  return artifacts;
+}
+
+function autoSizeIsValid(value) {
+  const match = String(value || '').match(/^(\d+)x(\d+)$/);
+  if (!match) return false;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const ratio = width / height;
+  return width % 16 === 0 && height % 16 === 0 && ratio >= 1 / 3 && ratio <= 3 &&
+    Math.max(width, height) <= 3840 && width * height <= 3840 * 2160;
+}
+
+function summarizeImageProbe(images, requestBody, elapsedMs, options = {}) {
   const artifacts = Array.isArray(images) ? images : [];
   const requestedN = Math.max(1, Number(requestBody && requestBody.n) || 1);
   const requestedFormat = (requestBody && requestBody.response_format) || null;
+  const requestedSize = (requestBody && requestBody.size) || null;
   const returnedFormats = [...new Set(artifacts.map((image) => image.response_format).filter(Boolean))];
+  const actualSizes = artifacts.map((image) => image.width && image.height ? `${image.width}x${image.height}` : null);
+  const dimensionErrors = artifacts.map((image) => image.dimension_error || null);
   const countOk = artifacts.length === requestedN;
   const formatOk = !requestedFormat ||
     (artifacts.length > 0 && returnedFormats.length === 1 && returnedFormats[0] === requestedFormat);
+  const validateSize = !!options.validateSize;
+  const sizeOk = !validateSize ? null : (
+    artifacts.length > 0 && actualSizes.every(Boolean) &&
+    (requestedSize === 'auto'
+      ? actualSizes.every(autoSizeIsValid)
+      : actualSizes.every((size) => size === requestedSize))
+  );
   const probe = {
     requested_n: requestedN,
     returned_n: artifacts.length,
@@ -353,14 +603,23 @@ function summarizeImageProbe(images, requestBody, elapsedMs) {
     returned_formats: returnedFormats,
     quality: (requestBody && requestBody.quality) || null,
     size: (requestBody && requestBody.size) || null,
+    requested_size: requestedSize,
+    actual_sizes: actualSizes,
+    dimension_errors: dimensionErrors,
     elapsed_ms: elapsedMs,
+    dimension_probe_ms: options.dimensionProbeMs == null ? null : options.dimensionProbeMs,
     ms_per_image: artifacts.length ? Math.round(Number(elapsedMs || 0) / artifacts.length) : null,
     count_ok: countOk,
-    format_ok: formatOk
+    format_ok: formatOk,
+    size_ok: sizeOk
   };
   const failures = [];
   if (!countOk) failures.push(`expected ${requestedN} image(s), received ${artifacts.length}`);
   if (!formatOk) failures.push(`expected response_format=${requestedFormat}, received ${returnedFormats.join(',') || 'none'}`);
+  if (validateSize && !sizeOk) {
+    const received = actualSizes.map((size, index) => size || `image ${index + 1}: unverified`).join(', ') || 'none';
+    failures.push(`expected size=${requestedSize}, received ${received}`);
+  }
   return { probe, error: failures.length ? failures.join('; ') : null };
 }
 
@@ -502,7 +761,7 @@ async function fetchOnce(request, timeoutMs) {
     const resp = await fetch(request.endpoint, {
       method: request.method || 'POST',
       headers: request.headers,
-      body: JSON.stringify(request.body),
+      body: request.formData || JSON.stringify(request.body),
       signal: ctl.signal
     });
 
@@ -594,6 +853,8 @@ module.exports = {
   normalizeUsage,
   sanitizePayload,
   extractImageArtifacts,
+  inspectImageDimensions,
+  parseImageDimensions,
   summarizeImageProbe,
   extractRoutedModel
 };

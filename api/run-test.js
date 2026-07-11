@@ -6,6 +6,7 @@ const {
   extractImageArtifacts,
   extractRoutedModel,
   fetchOnce,
+  inspectImageDimensions,
   normalizeGroup,
   normalizeUsage,
   sanitizePayload,
@@ -65,11 +66,22 @@ async function executeOne(question, cfg, user, batchId) {
   let imageProbe = null;
   let imageValidationError = null;
   if (groupName === 'Image') {
-    const summary = summarizeImageProbe(images, request.body, response.elapsedMs);
+    const validateSize = !!(question.validate && question.validate.size);
+    let dimensionProbeMs = null;
+    if (response.ok && validateSize && images.length) {
+      const startedAt = Date.now();
+      await inspectImageDimensions(images);
+      dimensionProbeMs = Date.now() - startedAt;
+    }
+    const summary = summarizeImageProbe(images, request.body, response.elapsedMs, {
+      validateSize,
+      dimensionProbeMs
+    });
     imageProbe = summary.probe;
     imageValidationError = summary.error;
     usage.requested_image_count = imageProbe.requested_n;
     usage.returned_image_count = images.length;
+    if (request.body.input_image_count) usage.input_image_count = request.body.input_image_count;
     cleanBody._image_probe = imageProbe;
   }
   const modelId = request.modelId || request.body.model || cfg.model || question.model;

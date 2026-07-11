@@ -167,7 +167,7 @@
       Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
       Google: '面向 Gemini models/*:generateContent 的质量探测。',
       Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
-      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、3×8 官方尺寸矩阵，以及 n=2/4/8 的多图耗时。'
+      Image: '固定测试 gpt-image-2：Base64/URL 回图、1/2/4/8 输入 Edit、带实际像素校验的 3×8 QS 矩阵，以及 n=2/4/8 多图耗时。'
     },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
@@ -220,7 +220,8 @@
     // never lingers in the selection.
     selectedModelIds(group, id) {
       const ep = Store.endpoint(group, id);
-      const enabled = (ep && ep.enabledModels) || [];
+      const enabled = ((ep && ep.enabledModels) || []).filter((model) => group !== 'Image' || model === 'gpt-image-2');
+      if (group === 'Image') return enabled;
       const map = Store.selectedModels[group] || {};
       return (map[id] || []).filter((m) => enabled.includes(m));
     },
@@ -621,7 +622,7 @@
       for (const id of selected) {
         const ep = Store.endpoint(group, id);
         if (!ep) continue;
-        const enabled = ep.enabledModels || [];
+        const enabled = (ep.enabledModels || []).filter((model) => group !== 'Image' || model === 'gpt-image-2');
         const row = document.createElement('div');
         row.className = 'picker-row picker-models';
         const tag = document.createElement('span');
@@ -644,10 +645,16 @@
           chip.type = 'button';
           chip.className = 'pick-chip model-chip' + (on ? ' active' : '');
           chip.textContent = m;
-          chip.addEventListener('click', () => Picker.toggleModel(id, m));
+          if (group === 'Image') {
+            chip.classList.add('locked');
+            chip.setAttribute('aria-disabled', 'true');
+            chip.title = 'Image 组固定测试 gpt-image-2';
+          } else {
+            chip.addEventListener('click', () => Picker.toggleModel(id, m));
+          }
           row.appendChild(chip);
         }
-        if (enabled.length > 1) {
+        if (group !== 'Image' && enabled.length > 1) {
           const all = document.createElement('button');
           all.type = 'button';
           all.className = 'link-btn picker-modelall';
@@ -1054,7 +1061,9 @@
         const section = document.createElement('section');
         section.className = 'qsection';
         const isImageMatrix = items.some((q) => q.layout === 'image-matrix');
+        const isImageEdit = items.some((q) => q.endpoint_type === 'openai_image_edits');
         if (isImageMatrix) section.classList.add('image-matrix-section');
+        if (isImageEdit) section.classList.add('image-edit-section');
         section.dataset.category = cat;
         const head = document.createElement('div');
         head.className = 'qsection-head';
@@ -1065,7 +1074,7 @@
           inner = Cards.buildImageMatrix(items);
         } else {
           inner = document.createElement('div');
-          inner.className = 'qgrid-inner';
+          inner.className = `qgrid-inner${isImageEdit ? ' edit-grid' : ''}`;
           for (const q of items) inner.appendChild(Cards.build(q));
         }
         section.appendChild(head);
@@ -1081,7 +1090,7 @@
 
     build(q) {
       const card = document.createElement('div');
-      card.className = 'qcard';
+      card.className = `qcard${q.endpoint_type === 'openai_image_edits' ? ' edit-card' : ''}`;
       card.dataset.qid = q.id;
       card.innerHTML = `
         <div class="qcard-head">
@@ -1094,6 +1103,7 @@
         </div>
         ${q.description ? `<div class="qcard-desc">${Util.escapeHtml(q.description)}</div>` : ''}
         ${Cards.questionSpec(q)}
+        ${Cards.editInputs(q)}
         ${q.observe ? `<div class="qcard-observe"><span class="observe-tag">观察点</span>${Util.escapeHtml(q.observe)}</div>` : ''}
         <div class="qcard-meta-row"></div>
         <div class="qcard-result"></div>`;
@@ -1201,13 +1211,27 @@
     questionSpec(q) {
       if (!q || q.group !== 'Image' || !q.image) return '';
       const specs = [
+        q.endpoint_type === 'openai_image_edits' ? `inputs=${(q.edit_inputs || []).length}` : '',
         `format=${q.image.response_format || 'default'}`,
         `q=${q.image.quality || 'default'}`,
         `s=${String(q.image.size || 'default').replace('x', '×')}`,
         `n=${q.image.n || 1}`
       ];
-      return `<div class="qcard-spec">${specs.map((item) =>
+      return `<div class="qcard-spec">${specs.filter(Boolean).map((item) =>
         `<span>${Util.escapeHtml(item)}</span>`).join('')}</div>`;
+    },
+
+    editInputs(q) {
+      if (!q || !Array.isArray(q.edit_inputs) || !q.edit_inputs.length) return '';
+      return `<div class="edit-inputs inputs-${q.edit_inputs.length}" aria-label="Edit 输入图片">${q.edit_inputs.map((input, index) => {
+        const file = String(input.file || '');
+        const safeFile = /^[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp)$/i.test(file) ? file : '';
+        if (!safeFile) return '';
+        return `<figure class="edit-input">
+          <img src="/assets/image-edit/${encodeURIComponent(safeFile)}" alt="${Util.escapeAttr(input.label || `Image ${index + 1}`)}" loading="lazy" />
+          <figcaption><strong>${Util.escapeHtml(input.label || `Image ${index + 1}`)}</strong><span>${Util.escapeHtml(input.role || '')}</span></figcaption>
+        </figure>`;
+      }).join('')}</div>`;
     },
 
     preview(q) {
@@ -1231,6 +1255,7 @@
     badgeRow(result) {
       const probe = result.image_probe || {};
       const formats = Array.isArray(probe.returned_formats) ? probe.returned_formats.join('+') : '';
+      const actualSizes = Array.isArray(probe.actual_sizes) ? probe.actual_sizes.filter(Boolean).join('+') : '';
       return [
         Util.badge(result.ok ? 'OK' : 'FAIL', result.ok ? 'ok' : 'fail'),
         result.response_status ? Util.badge(`HTTP ${result.response_status}`) : '',
@@ -1238,6 +1263,7 @@
         result.elapsed_ms != null ? Util.badge(`${result.elapsed_ms} ms`) : '',
         probe.returned_n != null ? Util.badge(`${probe.returned_n}/${probe.requested_n} img`, probe.count_ok ? 'ok' : 'fail') : '',
         formats ? Util.badge(formats, probe.format_ok ? 'info' : 'fail') : '',
+        actualSizes ? Util.badge(`size=${actualSizes}`, probe.size_ok === false ? 'fail' : 'info') : '',
         probe.requested_n > 1 && probe.ms_per_image != null ? Util.badge(`${probe.ms_per_image} ms/img`, 'info') : '',
         result.estimated_cost_usd != null ? Util.badge(`$${Util.formatCost(result.estimated_cost_usd)}`, 'info') : ''
       ].filter(Boolean).join('');
@@ -1274,7 +1300,8 @@
         img.addEventListener('error', () => tile.classList.add('load-error'));
         link.appendChild(img);
         const caption = document.createElement('figcaption');
-        caption.textContent = `#${Number(image.index || 0) + 1} · ${image.response_format || 'image'}`;
+        const dimensions = image.width && image.height ? ` · ${image.width}×${image.height}` : '';
+        caption.textContent = `#${Number(image.index || 0) + 1} · ${image.response_format || 'image'}${dimensions}`;
         tile.appendChild(link);
         tile.appendChild(caption);
         gallery.appendChild(tile);
@@ -1361,8 +1388,11 @@
       row.appendChild(head);
       const metrics = document.createElement('div');
       metrics.className = 'matrix-result-metrics';
+      const probe = result.image_probe || {};
+      const actualSizes = Array.isArray(probe.actual_sizes) ? probe.actual_sizes.filter(Boolean).join(', ') : '';
       metrics.innerHTML = [
         result.elapsed_ms != null ? `<span>${Util.escapeHtml(result.elapsed_ms)} ms</span>` : '',
+        actualSizes ? `<span class="${probe.size_ok === false ? 'metric-fail' : 'metric-ok'}">${Util.escapeHtml(actualSizes)}</span>` : '',
         result.estimated_cost_usd != null ? `<span>$${Util.formatCost(result.estimated_cost_usd)}</span>` : '',
         result.response_status ? `<span>HTTP ${Util.escapeHtml(result.response_status)}</span>` : ''
       ].filter(Boolean).join('');
@@ -1531,6 +1561,11 @@
         box.textContent = Cards.preview(q);
         inner.appendChild(box);
       }));
+      if (Array.isArray(q.edit_inputs) && q.edit_inputs.length) {
+        bodyHost.appendChild(Util.section(`Inputs (${q.edit_inputs.length})`, true, (inner) => {
+          inner.innerHTML = Cards.editInputs(q);
+        }));
+      }
       // Observation point.
       if (q.observe) {
         bodyHost.appendChild(Util.section('观察点 Observe', true, (inner) => {
@@ -1735,17 +1770,17 @@
         await Promise.all(Array.from({ length: Math.min(phaseConcurrency, phaseQuestions.length) }, worker));
       };
 
-      // Image probes have semantic stages: return capability must finish before
-      // the quality×size matrix, and the matrix must finish before n scaling.
-      // n=2/4/8 runs serially so their elapsed times are not contaminated by
-      // another n probe. Other groups retain their original concurrency.
+      // Image probes run category by category. Edit input scaling and n output
+      // scaling are serial so their elapsed times are not contaminated by a
+      // sibling probe. Other categories retain the selected concurrency.
       const phases = Store.activeGroup === 'Image'
         ? [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>
             qs.filter((q) => (q.category || '未分类') === category))
         : [qs];
       for (const phase of phases) {
         if (Store.stopFlag) break;
-        const phaseConcurrency = Store.activeGroup === 'Image' && phase[0] && phase[0].category === 'n 多图与耗时'
+        const phaseConcurrency = Store.activeGroup === 'Image' && phase[0] &&
+          ['Edit 多图输入', 'n 多图与耗时'].includes(phase[0].category)
           ? 1
           : concurrency;
         await runPhase(phase, phaseConcurrency);

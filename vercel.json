@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/run-test.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "assets/image-edit/**"
     },
     "api/admin/prices.js": {
       "maxDuration": 300

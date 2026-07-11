@@ -360,6 +360,7 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 .pick-chip:hover { border-color: var(--text-3); color: var(--text); }
 .pick-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .pick-chip.model-chip { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 3px 11px; min-height: 26px; }
+.pick-chip.model-chip.locked { cursor: default; }
 .pick-chip .pick-warn { color: #d97706; font-size: 13.5px; }
 .pick-chip.active .pick-warn { color: #fde68a; }
 .picker-summary { font-size: 13.5px; color: var(--text-3); }
@@ -419,6 +420,37 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .qgrid-inner { columns: 344px; column-gap: 14px; }
 .qgrid-inner > .qcard { break-inside: avoid; margin: 0 0 14px; }
 @media (max-width: 560px) { .qgrid-inner { columns: 1; } }
+
+.image-edit-section .edit-grid {
+  columns: auto; display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 450px), 1fr));
+  gap: 14px;
+}
+.image-edit-section .edit-grid > .qcard { margin: 0; align-self: stretch; }
+.edit-inputs {
+  display: grid; gap: 7px; padding: 0 14px 12px;
+}
+.edit-inputs.inputs-1 { width: 120px; grid-template-columns: 1fr; }
+.edit-inputs.inputs-2 { width: 247px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.edit-inputs.inputs-4,
+.edit-inputs.inputs-8 { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.edit-input {
+  min-width: 0; margin: 0; border: 1px solid var(--border); background: var(--surface-2);
+  overflow: hidden; border-radius: var(--radius-xs);
+}
+.edit-input img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--surface-3); }
+.edit-input figcaption { padding: 5px 6px; border-top: 1px solid var(--border); }
+.edit-input figcaption strong,
+.edit-input figcaption span {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0;
+}
+.edit-input figcaption strong { color: var(--text-2); font-size: 10px; line-height: 1.25; }
+.edit-input figcaption span { margin-top: 2px; color: var(--text-3); font: 500 9px/1.2 var(--mono); }
+.drawer-body .edit-inputs { padding: 0; }
+@media (max-width: 560px) {
+  .edit-inputs.inputs-1 { width: 72px; }
+  .edit-inputs.inputs-2 { width: 151px; }
+}
 
 /* ───────────────────────── Image lab / journal presentation ───────────────────────── */
 body.image-lab-mode {
@@ -816,20 +848,20 @@ body.drawer-open .drawer { transform: translateX(0); }
 
 /* ───────────────────────── Responsive: collapse sidebar to top ───────────────────────── */
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; }
+  .shell { width: 100%; grid-template-columns: minmax(0, 1fr); overflow-x: clip; }
   .sidebar {
     position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center;
-    gap: 8px; padding: 10px 14px; border-right: none; border-bottom: 1px solid var(--border);
+    width: 100%; min-width: 0; gap: 8px; padding: 10px 14px; border-right: none; border-bottom: 1px solid var(--border);
   }
   .sidebar-brand { padding: 0 8px 0 0; }
   .nav-label { display: none; }
-  .nav-section { flex: 1 1 100%; order: 3; }
+  .nav-section { min-width: 0; max-width: 100%; flex: 1 1 100%; order: 3; }
   .nav-section + .nav-section { margin-top: 0; }
-  .nav { flex-direction: row; flex: 1 1 100%; overflow-x: auto; gap: 4px; }
+  .nav { width: 100%; min-width: 0; max-width: 100%; flex-direction: row; flex: 1 1 100%; overflow-x: auto; gap: 4px; }
   .nav-item { width: auto; }
   .nav-item .nav-count { display: none; }
-  .sidebar-foot { margin: 0 0 0 auto; flex-direction: row; align-items: center; padding-top: 0; }
-  .main { padding: 22px 18px 56px; }
+  .sidebar-foot { min-width: 0; margin: 0 0 0 auto; flex-direction: row; align-items: center; padding-top: 0; }
+  .main { width: 100%; min-width: 0; padding: 22px 18px 56px; }
 }
 
 /* ───────────────────────── Simplified image matrix + n mosaics ───────────────────────── */
@@ -923,6 +955,8 @@ body.image-lab-mode .qcard:not(.matrix-cell) .qcard-head { border-top: 0; }
 .matrix-result-head b.fail { color: var(--danger); }
 .matrix-result-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .matrix-result-metrics span { color: var(--text-2); font: 550 9px/1.2 var(--mono); }
+.matrix-result-metrics .metric-ok { color: var(--success); }
+.matrix-result-metrics .metric-fail { color: var(--danger); }
 .matrix-result-error {
   margin-top: 5px; color: var(--danger); font-size: 9.5px; line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;

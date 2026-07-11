@@ -26,6 +26,12 @@ checkFile('schema.sql');
 checkFile('index.html');
 checkFile('app.js');
 checkFile('questions.js');
+for (const file of [
+  'scene-b.png', 'object-fox.png', 'object-orb.png', 'object-rocket.png',
+  'object-cactus.png', 'object-robot.png', 'object-compass.png', 'object-mug.png'
+]) {
+  checkFile(path.join('assets', 'image-edit', file));
+}
 
 const pkg = readJson('package.json');
 assert(pkg.dependencies && pkg.dependencies.pg, 'pg dependency missing');
@@ -34,6 +40,7 @@ ok('package scripts');
 
 const vercel = readJson('vercel.json');
 assert(vercel.functions && vercel.functions['api/run-test.js'], 'run-test function config missing');
+assert(vercel.functions['api/run-test.js'].includeFiles === 'assets/image-edit/**', 'run-test edit fixtures must be bundled');
 assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync'), 'combined sync cron missing');
 // Hobby plan caps a deployment at 12 serverless functions.
 const fnCount = fs.readdirSync(path.join(process.cwd(), 'api'), { recursive: true })
@@ -51,7 +58,9 @@ for (const group of ['OpenAI', 'Anthropic', 'Google', 'Sakana', 'Image']) {
   assert(groups[group] > 0, `${group} has no questions`);
 }
 assert(QUESTIONS.filter((q) => q.group === 'OpenAI').every((q) => q.endpoint_type === 'openai_responses'), 'OpenAI must use Responses endpoint tests');
-assert(QUESTIONS.filter((q) => q.group === 'Image').every((q) => q.endpoint_type === 'openai_images'), 'Image must use Images endpoint tests');
+const imageQuestions = QUESTIONS.filter((q) => q.group === 'Image');
+assert(imageQuestions.every((q) => ['openai_images', 'openai_image_edits'].includes(q.endpoint_type)), 'Image must use Images API tests');
+assert(imageQuestions.every((q) => q.model === 'gpt-image-2'), 'Every Image probe must use gpt-image-2');
 ok('question groups', JSON.stringify(groups));
 
 const env = {
