@@ -60,7 +60,7 @@ for (const group of ['OpenAI', 'Anthropic', 'Google', 'Sakana', 'Image']) {
 assert(QUESTIONS.filter((q) => q.group === 'OpenAI').every((q) => q.endpoint_type === 'openai_responses'), 'OpenAI must use Responses endpoint tests');
 const imageQuestions = QUESTIONS.filter((q) => q.group === 'Image');
 assert(imageQuestions.every((q) => ['openai_images', 'openai_image_edits'].includes(q.endpoint_type)), 'Image must use Images API tests');
-assert(imageQuestions.every((q) => q.model === 'gpt-image-2'), 'Every Image probe must use gpt-image-2');
+assert(imageQuestions.every((q) => q.model == null), 'Image probes must inherit the selected endpoint model');
 ok('question groups', JSON.stringify(groups));
 
 const env = {

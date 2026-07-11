@@ -94,7 +94,7 @@ assert.deepEqual(
   [...new Set(QUESTIONS.filter((q) => q.group === 'Image').map((q) => q.category))],
   ['回图能力', 'Edit 多图输入', 'Quality × Size 矩阵', 'n 多图与耗时']
 );
-assert(QUESTIONS.filter((q) => q.group === 'Image').every((q) => q.model === 'gpt-image-2'));
+assert(QUESTIONS.filter((q) => q.group === 'Image').every((q) => q.model == null));
 
 const endpointTypes = {};
 for (const group of Object.keys(counts)) {
@@ -146,6 +146,9 @@ for (const q of editQuestions) {
   assert.equal(entries.filter(([key]) => key === 'image[]').length, q.edit_inputs.length);
   assert(entries.filter(([key]) => key === 'image[]').every(([, file]) => file instanceof Blob && file.size > 0));
 }
+const versionedImageCfg = Object.assign(cfgFor('Image'), { model: 'gpt-image-2-2026-04-21' });
+const versionedEditRequest = buildUpstreamRequest(editQuestions[1], versionedImageCfg);
+assert.equal(versionedEditRequest.body.model, 'gpt-image-2-2026-04-21', 'Edit must inherit the selected image model');
 
 const matrixQuestions = QUESTIONS.filter((q) => q.category === 'Quality × Size 矩阵');
 const expectedImageSizes = [

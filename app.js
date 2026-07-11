@@ -167,7 +167,7 @@
       Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
       Google: '面向 Gemini models/*:generateContent 的质量探测。',
       Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
-      Image: '固定测试 gpt-image-2：Base64/URL 回图、1/2/4/8 输入 Edit、带实际像素校验的 3×8 QS 矩阵，以及 n=2/4/8 多图耗时。'
+      Image: '按当前选中的 GPT Image 模型测试 Base64/URL 回图、1/2/4/8 输入 Edit、带实际像素校验的 3×8 QS 矩阵，以及 n=2/4/8 多图耗时。'
     },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
@@ -220,8 +220,7 @@
     // never lingers in the selection.
     selectedModelIds(group, id) {
       const ep = Store.endpoint(group, id);
-      const enabled = ((ep && ep.enabledModels) || []).filter((model) => group !== 'Image' || model === 'gpt-image-2');
-      if (group === 'Image') return enabled;
+      const enabled = (ep && ep.enabledModels) || [];
       const map = Store.selectedModels[group] || {};
       return (map[id] || []).filter((m) => enabled.includes(m));
     },
@@ -622,7 +621,7 @@
       for (const id of selected) {
         const ep = Store.endpoint(group, id);
         if (!ep) continue;
-        const enabled = (ep.enabledModels || []).filter((model) => group !== 'Image' || model === 'gpt-image-2');
+        const enabled = ep.enabledModels || [];
         const row = document.createElement('div');
         row.className = 'picker-row picker-models';
         const tag = document.createElement('span');
@@ -645,16 +644,10 @@
           chip.type = 'button';
           chip.className = 'pick-chip model-chip' + (on ? ' active' : '');
           chip.textContent = m;
-          if (group === 'Image') {
-            chip.classList.add('locked');
-            chip.setAttribute('aria-disabled', 'true');
-            chip.title = 'Image 组固定测试 gpt-image-2';
-          } else {
-            chip.addEventListener('click', () => Picker.toggleModel(id, m));
-          }
+          chip.addEventListener('click', () => Picker.toggleModel(id, m));
           row.appendChild(chip);
         }
-        if (group !== 'Image' && enabled.length > 1) {
+        if (enabled.length > 1) {
           const all = document.createElement('button');
           all.type = 'button';
           all.className = 'link-btn picker-modelall';

@@ -360,7 +360,6 @@ button.subtle:hover:not(:disabled) { background: var(--hover); color: var(--text
 .pick-chip:hover { border-color: var(--text-3); color: var(--text); }
 .pick-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .pick-chip.model-chip { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 3px 11px; min-height: 26px; }
-.pick-chip.model-chip.locked { cursor: default; }
 .pick-chip .pick-warn { color: #d97706; font-size: 13.5px; }
 .pick-chip.active .pick-warn { color: #fde68a; }
 .picker-summary { font-size: 13.5px; color: var(--text-3); }
