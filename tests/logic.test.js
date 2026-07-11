@@ -3,7 +3,14 @@ const assert = require('node:assert/strict');
 global.window = global;
 require('../questions.js');
 
-const { buildUpstreamRequest, buildModelsRequest, extractModelIds } = require('../api/_lib/providers');
+const {
+  buildUpstreamRequest,
+  buildModelsRequest,
+  extractImageArtifacts,
+  extractModelIds,
+  sanitizePayload,
+  summarizeImageProbe
+} = require('../api/_lib/providers');
 const { extractAllowedRows } = require('../api/_lib/pricing');
 const { issueSession } = require('../api/_lib/auth');
 
@@ -79,7 +86,11 @@ assert.equal(counts.OpenAI, 4);
 assert.equal(counts.Anthropic, 25);
 assert.equal(counts.Google, 4);
 assert.equal(counts.Sakana, 4);
-assert.equal(counts.Image, 5);
+assert.equal(counts.Image, 15);
+assert.deepEqual(
+  [...new Set(QUESTIONS.filter((q) => q.group === 'Image').map((q) => q.category))],
+  ['回图能力', 'Quality × Size 矩阵', 'n 多图与耗时']
+);
 
 const endpointTypes = {};
 for (const group of Object.keys(counts)) {
@@ -103,9 +114,54 @@ const imageRequest = buildUpstreamRequest(imageN2, cfgFor('Image'));
 assert.equal(imageRequest.endpoint, 'https://api.openai.com/v1/images/generations');
 assert.equal(imageRequest.body.model, 'gpt-image-2');
 assert.equal(imageRequest.body.n, 2);
-assert.equal(imageRequest.body.quality, 'medium');
+assert.equal(imageRequest.body.quality, 'low');
 assert.equal(imageRequest.body.size, '1024x1024');
-assert.deepEqual(QUESTIONS.find((q) => q.id === 'image-load-burst').load, { requests: 5, concurrency: 2 });
+assert.equal(imageRequest.body.response_format, 'url');
+
+const imageReturnB64 = QUESTIONS.find((q) => q.id === 'image-return-b64');
+const imageReturnUrl = QUESTIONS.find((q) => q.id === 'image-return-url');
+assert.equal(buildUpstreamRequest(imageReturnB64, cfgFor('Image')).body.response_format, 'b64_json');
+assert.equal(buildUpstreamRequest(imageReturnUrl, cfgFor('Image')).body.response_format, 'url');
+
+const matrixQuestions = QUESTIONS.filter((q) => q.category === 'Quality × Size 矩阵');
+assert.equal(matrixQuestions.length, 9);
+assert.deepEqual(
+  matrixQuestions.map((q) => `${q.image.quality}:${q.image.size}`),
+  [
+    'low:1024x1024', 'low:1536x1024', 'low:1024x1536',
+    'medium:1024x1024', 'medium:1536x1024', 'medium:1024x1536',
+    'high:1024x1024', 'high:1536x1024', 'high:1024x1536'
+  ]
+);
+assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format === 'url'));
+
+const nQuestions = QUESTIONS.filter((q) => q.category === 'n 多图与耗时');
+assert.deepEqual(nQuestions.map((q) => q.image.n), [1, 2, 4, 8]);
+assert(nQuestions.every((q) =>
+  q.image.quality === 'low' && q.image.size === '1024x1024' && q.image.response_format === 'url'
+));
+
+const b64 = 'A'.repeat(200);
+const extractedB64 = extractImageArtifacts({ data: [{ b64_json: b64 }] }, { output_format: 'png' });
+assert.equal(extractedB64.length, 1);
+assert.equal(extractedB64[0].response_format, 'b64_json');
+assert(extractedB64[0].src.startsWith('data:image/png;base64,'));
+assert.equal(extractedB64[0].base64_chars, 200);
+const extractedUrl = extractImageArtifacts({ data: [{ url: 'https://images.example.test/1.png' }] }, {});
+assert.deepEqual(extractedUrl.map((item) => item.response_format), ['url']);
+assert.equal(extractedUrl[0].src, 'https://images.example.test/1.png');
+assert.equal(sanitizePayload({ data: [{ b64_json: b64 }] }).data[0].b64_json, '[base64 omitted, 200 chars]');
+const urlProbe = summarizeImageProbe(extractedUrl, {
+  n: 1,
+  quality: 'low',
+  size: '1024x1024',
+  response_format: 'url'
+}, 1200);
+assert.equal(urlProbe.error, null);
+assert.equal(urlProbe.probe.ms_per_image, 1200);
+const badProbe = summarizeImageProbe(extractedUrl, { n: 2, response_format: 'b64_json' }, 1200);
+assert.match(badProbe.error, /expected 2 image/);
+assert.match(badProbe.error, /expected response_format=b64_json/);
 
 const sakanaRequest = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'sakana-fugu-basic'), cfgFor('Sakana'));
 assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');

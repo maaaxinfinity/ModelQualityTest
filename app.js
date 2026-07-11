@@ -167,7 +167,7 @@
       Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
       Google: '面向 Gemini models/*:generateContent 的质量探测。',
       Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
-      Image: '探测 gpt-image-2 的 n、quality、size 参数与小压测。'
+      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、quality×size 矩阵，以及 n=1/2/4/8 的多图耗时。'
     },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
@@ -1054,11 +1054,14 @@
         const items = byCat.get(cat);
         const section = document.createElement('section');
         section.className = 'qsection';
+        const isImageMatrix = items.some((q) => q.layout === 'image-matrix');
+        if (isImageMatrix) section.classList.add('image-matrix-section');
         section.dataset.category = cat;
         const head = document.createElement('div');
         head.className = 'qsection-head';
         head.innerHTML = `<h3 class="qsection-title">${Util.escapeHtml(cat)}</h3>` +
-          `<span class="qsection-count">${items.length}</span>`;
+          `<span class="qsection-count">${items.length}</span>` +
+          (isImageMatrix ? '<span class="qsection-note">行 quality · 列 size</span>' : '');
         const inner = document.createElement('div');
         inner.className = 'qgrid-inner';
         for (const q of items) inner.appendChild(Cards.build(q));
@@ -1087,6 +1090,7 @@
           </div>
         </div>
         ${q.description ? `<div class="qcard-desc">${Util.escapeHtml(q.description)}</div>` : ''}
+        ${Cards.questionSpec(q)}
         ${q.observe ? `<div class="qcard-observe"><span class="observe-tag">观察点</span>${Util.escapeHtml(q.observe)}</div>` : ''}
         <div class="qcard-meta-row"></div>
         <div class="qcard-result"></div>`;
@@ -1097,6 +1101,18 @@
         e.stopPropagation(); Runner.runOne(q, card);
       });
       return card;
+    },
+
+    questionSpec(q) {
+      if (!q || q.group !== 'Image' || !q.image) return '';
+      const specs = [
+        `format=${q.image.response_format || 'default'}`,
+        `q=${q.image.quality || 'default'}`,
+        `s=${String(q.image.size || 'default').replace('x', '×')}`,
+        `n=${q.image.n || 1}`
+      ];
+      return `<div class="qcard-spec">${specs.map((item) =>
+        `<span>${Util.escapeHtml(item)}</span>`).join('')}</div>`;
     },
 
     preview(q) {
@@ -1118,13 +1134,48 @@
     },
 
     badgeRow(result) {
+      const probe = result.image_probe || {};
+      const formats = Array.isArray(probe.returned_formats) ? probe.returned_formats.join('+') : '';
       return [
         Util.badge(result.ok ? 'OK' : 'FAIL', result.ok ? 'ok' : 'fail'),
         result.response_status ? Util.badge(`HTTP ${result.response_status}`) : '',
         (result.routed_model_id || result.model_id) ? Util.badge(`model=${Util.escapeHtml(result.routed_model_id || result.model_id)}`) : '',
         result.elapsed_ms != null ? Util.badge(`${result.elapsed_ms} ms`) : '',
+        probe.returned_n != null ? Util.badge(`${probe.returned_n}/${probe.requested_n} img`, probe.count_ok ? 'ok' : 'fail') : '',
+        formats ? Util.badge(formats, probe.format_ok ? 'info' : 'fail') : '',
+        probe.requested_n > 1 && probe.ms_per_image != null ? Util.badge(`${probe.ms_per_image} ms/img`, 'info') : '',
         result.estimated_cost_usd != null ? Util.badge(`$${Util.formatCost(result.estimated_cost_usd)}`, 'info') : ''
       ].filter(Boolean).join('');
+    },
+
+    imageGallery(result, compact) {
+      const images = Array.isArray(result && result.images) ? result.images : [];
+      if (!images.length) return null;
+      const gallery = document.createElement('div');
+      gallery.className = `image-gallery${compact ? ' compact' : ''}`;
+      for (const image of images) {
+        const src = String(image && image.src || '');
+        if (!/^https?:\/\//i.test(src) && !/^data:image\/(?:png|jpe?g|webp);base64,/i.test(src)) continue;
+        const tile = document.createElement('figure');
+        tile.className = 'image-tile';
+        const link = document.createElement('a');
+        link.href = src;
+        link.rel = 'noopener noreferrer';
+        if (/^https?:\/\//i.test(src)) link.target = '_blank';
+        else link.download = `image-${Number(image.index || 0) + 1}.${image.mime_type === 'image/jpeg' ? 'jpg' : (image.mime_type || 'image/png').split('/')[1]}`;
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = `生成图片 ${Number(image.index || 0) + 1}`;
+        img.loading = compact ? 'lazy' : 'eager';
+        img.addEventListener('error', () => tile.classList.add('load-error'));
+        link.appendChild(img);
+        const caption = document.createElement('figcaption');
+        caption.textContent = `#${Number(image.index || 0) + 1} · ${image.response_format || 'image'}`;
+        tile.appendChild(link);
+        tile.appendChild(caption);
+        gallery.appendChild(tile);
+      }
+      return gallery.childElementCount ? gallery : null;
     },
 
     // Build the detail sections (Summary/Response/Request/Headers) for one result into a host.
@@ -1134,6 +1185,10 @@
         div.className = 'warn-box';
         div.textContent = result.error_message;
         host.appendChild(div);
+      }
+      const gallery = Cards.imageGallery(result, false);
+      if (gallery) {
+        host.appendChild(Util.section(`Images (${result.images.length})`, true, (inner) => inner.appendChild(gallery)));
       }
       host.appendChild(Util.section('Summary', true, (inner) => {
         inner.appendChild(Util.jsonBlock({
@@ -1147,6 +1202,7 @@
           ok: result.ok,
           status: result.response_status,
           elapsed_ms: result.elapsed_ms,
+          image_probe: result.image_probe,
           usage: result.usage_json,
           estimated_cost_usd: result.estimated_cost_usd,
           cost_source: result.cost_source
@@ -1181,6 +1237,8 @@
         `<span class="result-row-badges">${Cards.badgeRow(result)}</span>`;
       head.appendChild(Cards.verdictControls(key, card));
       row.appendChild(head);
+      const gallery = Cards.imageGallery(result, true);
+      if (gallery) row.appendChild(gallery);
       return row;
     },
 
@@ -1508,36 +1566,54 @@
 
       const qs = Store.questionsForGroup(Store.activeGroup).filter((q) => !Cards.isHiddenByFilter(q));
       const total = qs.length * targets.length; // question × (endpoint × model) pairs
-      let next = 0, done = 0;
+      let done = 0;
       const concurrency = Math.max(1, Math.min(20, Number(Util.el('opt-concurrency').value || 1)));
       const batchId = Util.makeBatchId();
       UI.progress(0, total);
 
-      const worker = async () => {
-        while (!Store.stopFlag) {
-          const idx = next++;
-          if (idx >= qs.length) return;
-          const q = qs[idx];
-          const card = Cards.forId(q.id);
-          if (!card) continue;
-          Cards.setBusy(card, true);
-          Cards.renderTargets(card, targets);
-          UI.flash(`${done}/${total} · ${q.name}`, 'running');
-          const list = await Runner.runAcross(q, targets, batchId, {
-            onStart: (key) => Cards.markResultRunning(card, key),
-            onDone: (key, endpoint, model, result) => {
-              Cards.fillResultRow(card, key, endpoint, model, result);
-              done++;
-              UI.flash(`${done}/${total}`, 'running');
-              UI.progress(done, total);
-            }
-          });
-          Cards.renderResults(card, list);
-          Cards.setBusy(card, false);
-        }
+      const runPhase = async (phaseQuestions, phaseConcurrency = concurrency) => {
+        let next = 0;
+        const worker = async () => {
+          while (!Store.stopFlag) {
+            const idx = next++;
+            if (idx >= phaseQuestions.length) return;
+            const q = phaseQuestions[idx];
+            const card = Cards.forId(q.id);
+            if (!card) continue;
+            Cards.setBusy(card, true);
+            Cards.renderTargets(card, targets);
+            UI.flash(`${done}/${total} · ${q.name}`, 'running');
+            const list = await Runner.runAcross(q, targets, batchId, {
+              onStart: (key) => Cards.markResultRunning(card, key),
+              onDone: (key, endpoint, model, result) => {
+                Cards.fillResultRow(card, key, endpoint, model, result);
+                done++;
+                UI.flash(`${done}/${total}`, 'running');
+                UI.progress(done, total);
+              }
+            });
+            Cards.renderResults(card, list);
+            Cards.setBusy(card, false);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(phaseConcurrency, phaseQuestions.length) }, worker));
       };
 
-      await Promise.all(Array.from({ length: Math.min(concurrency, qs.length) }, worker));
+      // Image probes have semantic stages: return capability must finish before
+      // the quality×size matrix, and the matrix must finish before n scaling.
+      // n=1/2/4/8 runs serially so their elapsed times are not contaminated by
+      // another n probe. Other groups retain their original concurrency.
+      const phases = Store.activeGroup === 'Image'
+        ? [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>
+            qs.filter((q) => (q.category || '未分类') === category))
+        : [qs];
+      for (const phase of phases) {
+        if (Store.stopFlag) break;
+        const phaseConcurrency = Store.activeGroup === 'Image' && phase[0] && phase[0].category === 'n 多图与耗时'
+          ? 1
+          : concurrency;
+        await runPhase(phase, phaseConcurrency);
+      }
       Store.batchRunning = false;
       UI.refreshControls();
       UI.flash(Store.stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, Store.stopFlag ? 'error' : 'done');
@@ -1555,8 +1631,16 @@
 
   function exportLocalResults() {
     if (!Store.resultsById.size) return UI.flash('暂无结果', 'error');
-    const rows = [...Store.resultsById.entries()].map(([key, result]) =>
-      Object.assign({ verdict: Store.getVerdict(key) || null }, result));
+    const rows = [...Store.resultsById.entries()].map(([key, result]) => {
+      const row = Object.assign({ verdict: Store.getVerdict(key) || null }, result);
+      if (Array.isArray(row.images)) {
+        row.images = row.images.map((image) => {
+          if (!String(image.src || '').startsWith('data:image/')) return image;
+          return Object.assign({}, image, { src: `[base64 omitted, ${image.base64_chars || 0} chars]` });
+        });
+      }
+      return row;
+    });
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

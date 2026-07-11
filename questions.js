@@ -521,68 +521,76 @@ const SAKANA_QUESTIONS = [
   }
 ];
 
-const IMAGE_QUESTIONS = [
+const IMAGE_MATRIX_PROMPT =
+  'A studio product photograph of a translucent cobalt-blue glass cube on a pale stone pedestal, soft directional light, clean neutral background, no text.';
+
+const IMAGE_RETURN_QUESTIONS = [
   {
-    id: 'image-basic-1024',
+    id: 'image-return-b64',
     group: 'Image',
     provider: 'openai',
     endpoint_type: 'openai_images',
-    category: 'gpt-image-2 参数',
-    name: '基础生成 1024',
-    description: '验证 gpt-image-2 /v1/images/generations 基础可用性',
-    prompt: 'A compact product photo of a translucent blue mechanical keyboard keycap on a white desk, realistic lighting.',
-    image: { n: 1, quality: 'medium', size: '1024x1024' },
-    observe: '预期：返回 data[]；日志会省略 b64_json 正文，仅记录长度。'
+    category: '回图能力',
+    name: 'Base64 回图',
+    description: '验证 response_format=b64_json，并在网页直接渲染图片',
+    prompt: IMAGE_MATRIX_PROMPT,
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'b64_json' },
+    observe: '通过条件：HTTP 成功、返回 1 张 b64_json 图片且前端可显示；数据库只记录 Base64 长度。'
   },
   {
-    id: 'image-quality-high',
+    id: 'image-return-url',
     group: 'Image',
     provider: 'openai',
     endpoint_type: 'openai_images',
-    category: 'gpt-image-2 参数',
-    name: 'quality=high',
-    description: '验证 quality 参数支持度和成本变化',
-    prompt: 'A precise editorial illustration of five model providers as labeled test benches in a clean lab.',
-    image: { n: 1, quality: 'high', size: '1024x1024' },
-    observe: '比较 quality=medium/high 的状态码、耗时和价格估算。'
-  },
-  {
-    id: 'image-size-wide',
-    group: 'Image',
-    provider: 'openai',
-    endpoint_type: 'openai_images',
-    category: 'gpt-image-2 参数',
-    name: '宽图 size',
-    description: '验证非正方形 size 参数',
-    prompt: 'A wide dashboard screenshot mockup showing model test logs, charts, and cost totals, crisp UI.',
-    image: { n: 1, quality: 'medium', size: '1536x864' },
-    observe: '预期：支持宽图尺寸；若 400，说明渠道参数白名单不完整。'
-  },
-  {
-    id: 'image-n-2',
-    group: 'Image',
-    provider: 'openai',
-    endpoint_type: 'openai_images',
-    category: 'gpt-image-2 参数',
-    name: 'n=2 多图',
-    description: '验证 n 参数是否允许一次返回多张图',
-    prompt: 'Two variations of a minimal black and white app icon for model quality evaluation.',
-    image: { n: 2, quality: 'medium', size: '1024x1024' },
-    observe: '预期：data.length=2；若代理强制 n=1，日志里可以看出。'
-  },
-  {
-    id: 'image-load-burst',
-    group: 'Image',
-    provider: 'openai',
-    endpoint_type: 'openai_images',
-    category: '压测',
-    name: '图片小压测 5 请求',
-    description: '并发 2、总计 5 次，用于观察限速、失败率和总成本',
-    prompt: 'A small abstract geometric tile pattern for stress testing image generation.',
-    image: { n: 1, quality: 'low', size: '1024x1024' },
-    load: { requests: 5, concurrency: 2 },
-    observe: '后台会为每次子请求写日志，前端显示汇总。'
+    category: '回图能力',
+    name: 'URL 回图',
+    description: '验证 response_format=url，并在网页加载返回 URL',
+    prompt: IMAGE_MATRIX_PROMPT,
+    image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
+    observe: '通过条件：HTTP 成功、返回 1 个图片 URL 且前端可显示。URL 可能具有有效期。'
   }
+];
+
+const IMAGE_MATRIX_QUALITIES = ['low', 'medium', 'high'];
+const IMAGE_MATRIX_SIZES = [
+  { id: 'square', value: '1024x1024', label: '1K 方图' },
+  { id: 'landscape', value: '1536x1024', label: '横图' },
+  { id: 'portrait', value: '1024x1536', label: '竖图' }
+];
+
+const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
+  IMAGE_MATRIX_SIZES.map((size) => ({
+    id: `image-matrix-${quality}-${size.id}`,
+    group: 'Image',
+    provider: 'openai',
+    endpoint_type: 'openai_images',
+    category: 'Quality × Size 矩阵',
+    name: `${quality} · ${size.value}`,
+    description: `${size.label}，quality=${quality}`,
+    prompt: IMAGE_MATRIX_PROMPT,
+    image: { n: 1, quality, size: size.value, response_format: 'url' },
+    layout: 'image-matrix',
+    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本。'
+  }))
+);
+
+const IMAGE_N_QUESTIONS = [1, 2, 4, 8].map((n) => ({
+  id: `image-n-${n}`,
+  group: 'Image',
+  provider: 'openai',
+  endpoint_type: 'openai_images',
+  category: 'n 多图与耗时',
+  name: `n=${n}`,
+  description: `单次请求生成 ${n} 张 1K low 图片`,
+  prompt: 'A minimal geometric app icon for an AI model quality dashboard, black, white, and electric blue, no text. Create distinct visual variations.',
+  image: { n, quality: 'low', size: '1024x1024', response_format: 'url' },
+  observe: `通过条件：返回 ${n} 张 URL 图片；记录请求总耗时和平均每张耗时。`
+}));
+
+const IMAGE_QUESTIONS = [
+  ...IMAGE_RETURN_QUESTIONS,
+  ...IMAGE_MATRIX_QUESTIONS,
+  ...IMAGE_N_QUESTIONS
 ];
 
 const QUESTIONS = [

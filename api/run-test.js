@@ -3,11 +3,13 @@ const { sendJson, sendMethodNotAllowed, readJson } = require('./_lib/http');
 const { randomId, requireUser } = require('./_lib/auth');
 const {
   buildUpstreamRequest,
+  extractImageArtifacts,
   extractRoutedModel,
   fetchOnce,
   normalizeGroup,
   normalizeUsage,
-  sanitizePayload
+  sanitizePayload,
+  summarizeImageProbe
 } = require('./_lib/providers');
 const { estimateCostForRun } = require('./_lib/pricing');
 
@@ -54,11 +56,26 @@ async function executeOne(question, cfg, user, batchId) {
   const request = buildUpstreamRequest(question, cfg);
   const response = await fetchOnce(request, Number(cfg.timeout || question.timeout || 600000));
   const body = response.json || { raw_text: response.text };
-  const cleanBody = sanitizePayload(body);
+  const sanitizedBody = sanitizePayload(body);
+  const cleanBody = sanitizedBody && typeof sanitizedBody === 'object'
+    ? sanitizedBody
+    : { value: sanitizedBody };
   const usage = normalizeUsage(body, groupName, question, request.body);
+  const images = groupName === 'Image' ? extractImageArtifacts(body, request.body) : [];
+  let imageProbe = null;
+  let imageValidationError = null;
+  if (groupName === 'Image') {
+    const summary = summarizeImageProbe(images, request.body, response.elapsedMs);
+    imageProbe = summary.probe;
+    imageValidationError = summary.error;
+    usage.requested_image_count = imageProbe.requested_n;
+    usage.returned_image_count = images.length;
+    cleanBody._image_probe = imageProbe;
+  }
   const modelId = request.modelId || request.body.model || cfg.model || question.model;
   const routedModel = extractRoutedModel(body, response.headers, modelId);
   const cost = await estimateCostForRun(groupName, routedModel || modelId, usage);
+  const resultOk = response.ok && !imageValidationError;
   const result = {
     id: randomId('run'),
     batch_id: batchId || null,
@@ -75,12 +92,16 @@ async function executeOne(question, cfg, user, batchId) {
     response_status: response.status,
     response_headers: response.headers,
     response_body: cleanBody,
-    ok: response.ok,
+    ok: resultOk,
     elapsed_ms: response.elapsedMs,
     usage_json: usage,
+    images: groupName === 'Image' ? images : undefined,
+    image_probe: imageProbe,
     estimated_cost_usd: cost.estimated_cost_usd,
     cost_source: cost.cost_source,
-    error_message: response.ok ? null : (body.error && (body.error.message || body.error.type)) || response.statusText || 'upstream_error'
+    error_message: response.ok
+      ? imageValidationError
+      : (body.error && (body.error.message || body.error.type)) || response.statusText || 'upstream_error'
   };
   await logRun(result);
   return result;

@@ -195,6 +195,7 @@ function buildImage(question, cfg) {
   if (image.moderation) body.moderation = image.moderation;
   if (image.output_compression) body.output_compression = Number(image.output_compression);
   if (image.output_format) body.output_format = image.output_format;
+  if (image.response_format) body.response_format = image.response_format;
   const headers = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${cfg.apiKey}`
@@ -275,6 +276,92 @@ function sanitizePayload(value) {
     }
   }
   return out;
+}
+
+function imageMimeType(requestBody, item) {
+  const explicit = String((item && (item.mime_type || item.content_type)) || '').trim().toLowerCase();
+  if (/^image\/(png|jpe?g|webp)$/.test(explicit)) return explicit.replace('image/jpg', 'image/jpeg');
+  const format = String((requestBody && requestBody.output_format) || 'png').trim().toLowerCase();
+  if (format === 'jpg' || format === 'jpeg') return 'image/jpeg';
+  if (format === 'webp') return 'image/webp';
+  return 'image/png';
+}
+
+// Keep image bytes out of PostgreSQL logs while returning renderable artifacts
+// to the current browser session. Supports the common OpenAI-compatible shapes
+// used by official and proxied Images APIs.
+function extractImageArtifacts(body, requestBody) {
+  if (!body || typeof body !== 'object') return [];
+  let items = [];
+  if (Array.isArray(body.data)) items = body.data;
+  else if (Array.isArray(body.images)) items = body.images;
+  else if (body.url || body.b64_json || body.image_base64 || body.base64) items = [body];
+
+  const artifacts = [];
+  for (let index = 0; index < items.length; index++) {
+    const raw = items[index];
+    const item = typeof raw === 'string' ? { value: raw } : (raw || {});
+    const value = typeof item.value === 'string' ? item.value : '';
+    const url = item.url || item.image_url || item.uri || (/^https?:\/\//i.test(value) ? value : '');
+    const b64 = item.b64_json || item.image_base64 || item.base64 ||
+      (/^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length > 128 ? value : '');
+    const revisedPrompt = typeof item.revised_prompt === 'string' ? item.revised_prompt : null;
+
+    if (typeof url === 'string' && url.trim()) {
+      artifacts.push({
+        index,
+        response_format: 'url',
+        src: url.trim(),
+        revised_prompt: revisedPrompt
+      });
+      continue;
+    }
+    if (typeof b64 === 'string' && b64.trim()) {
+      let mimeType = imageMimeType(requestBody, item);
+      let clean = b64.trim();
+      const dataUri = clean.match(/^data:(image\/(?:png|jpe?g|webp));base64,([\s\S]+)$/i);
+      if (dataUri) {
+        mimeType = dataUri[1].toLowerCase().replace('image/jpg', 'image/jpeg');
+        clean = dataUri[2].trim();
+      }
+      artifacts.push({
+        index,
+        response_format: 'b64_json',
+        src: `data:${mimeType};base64,${clean}`,
+        mime_type: mimeType,
+        base64_chars: clean.length,
+        byte_estimate: Math.floor(clean.length * 3 / 4),
+        revised_prompt: revisedPrompt
+      });
+    }
+  }
+  return artifacts;
+}
+
+function summarizeImageProbe(images, requestBody, elapsedMs) {
+  const artifacts = Array.isArray(images) ? images : [];
+  const requestedN = Math.max(1, Number(requestBody && requestBody.n) || 1);
+  const requestedFormat = (requestBody && requestBody.response_format) || null;
+  const returnedFormats = [...new Set(artifacts.map((image) => image.response_format).filter(Boolean))];
+  const countOk = artifacts.length === requestedN;
+  const formatOk = !requestedFormat ||
+    (artifacts.length > 0 && returnedFormats.length === 1 && returnedFormats[0] === requestedFormat);
+  const probe = {
+    requested_n: requestedN,
+    returned_n: artifacts.length,
+    requested_format: requestedFormat,
+    returned_formats: returnedFormats,
+    quality: (requestBody && requestBody.quality) || null,
+    size: (requestBody && requestBody.size) || null,
+    elapsed_ms: elapsedMs,
+    ms_per_image: artifacts.length ? Math.round(Number(elapsedMs || 0) / artifacts.length) : null,
+    count_ok: countOk,
+    format_ok: formatOk
+  };
+  const failures = [];
+  if (!countOk) failures.push(`expected ${requestedN} image(s), received ${artifacts.length}`);
+  if (!formatOk) failures.push(`expected response_format=${requestedFormat}, received ${returnedFormats.join(',') || 'none'}`);
+  return { probe, error: failures.length ? failures.join('; ') : null };
 }
 
 function parseJsonMaybe(text) {
@@ -506,5 +593,7 @@ module.exports = {
   normalizeGroup,
   normalizeUsage,
   sanitizePayload,
+  extractImageArtifacts,
+  summarizeImageProbe,
   extractRoutedModel
 };
