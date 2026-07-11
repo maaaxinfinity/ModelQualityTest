@@ -86,7 +86,7 @@ assert.equal(counts.OpenAI, 4);
 assert.equal(counts.Anthropic, 25);
 assert.equal(counts.Google, 4);
 assert.equal(counts.Sakana, 4);
-assert.equal(counts.Image, 15);
+assert.equal(counts.Image, 30);
 assert.deepEqual(
   [...new Set(QUESTIONS.filter((q) => q.group === 'Image').map((q) => q.category))],
   ['回图能力', 'Quality × Size 矩阵', 'n 多图与耗时']
@@ -124,14 +124,16 @@ assert.equal(buildUpstreamRequest(imageReturnB64, cfgFor('Image')).body.response
 assert.equal(buildUpstreamRequest(imageReturnUrl, cfgFor('Image')).body.response_format, 'url');
 
 const matrixQuestions = QUESTIONS.filter((q) => q.category === 'Quality × Size 矩阵');
-assert.equal(matrixQuestions.length, 9);
+const expectedImageSizes = [
+  '1024x1024', '1536x1024', '1024x1536', '2048x2048',
+  '2048x1152', '3840x2160', '2160x3840', 'auto'
+];
+assert.equal(matrixQuestions.length, 24);
+assert.deepEqual([...new Set(matrixQuestions.map((q) => q.image.quality))], ['low', 'medium', 'high']);
+assert.deepEqual([...new Set(matrixQuestions.map((q) => q.image.size))], expectedImageSizes);
 assert.deepEqual(
   matrixQuestions.map((q) => `${q.image.quality}:${q.image.size}`),
-  [
-    'low:1024x1024', 'low:1536x1024', 'low:1024x1536',
-    'medium:1024x1024', 'medium:1536x1024', 'medium:1024x1536',
-    'high:1024x1024', 'high:1536x1024', 'high:1024x1536'
-  ]
+  ['low', 'medium', 'high'].flatMap((quality) => expectedImageSizes.map((size) => `${quality}:${size}`))
 );
 assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format === 'url'));
 

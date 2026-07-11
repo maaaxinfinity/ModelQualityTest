@@ -167,7 +167,7 @@
       Anthropic: '探测 Claude 渠道、system 注入与 thinking 行为。',
       Google: '面向 Gemini models/*:generateContent 的质量探测。',
       Sakana: '以 OpenAI 兼容形态探测 Sakana / Fugu。',
-      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、quality×size 矩阵，以及 n=1/2/4/8 的多图耗时。'
+      Image: '依次探测 gpt-image-2 的 Base64/URL 回图、3×8 官方尺寸矩阵，以及 n=1/2/4/8 的多图耗时。'
     },
     DEFAULTS: {
       OpenAI: { baseUrl: 'https://api.openai.com', model: 'gpt-5.5', authMode: 'bearer' },
@@ -1061,10 +1061,15 @@
         head.className = 'qsection-head';
         head.innerHTML = `<h3 class="qsection-title">${Util.escapeHtml(cat)}</h3>` +
           `<span class="qsection-count">${items.length}</span>` +
-          (isImageMatrix ? '<span class="qsection-note">行 quality · 列 size</span>' : '');
-        const inner = document.createElement('div');
-        inner.className = 'qgrid-inner';
-        for (const q of items) inner.appendChild(Cards.build(q));
+          (isImageMatrix ? '<span class="qsection-note">3 qualities × 8 documented size presets</span>' : '');
+        let inner;
+        if (isImageMatrix) {
+          inner = Cards.buildImageMatrix(items);
+        } else {
+          inner = document.createElement('div');
+          inner.className = 'qgrid-inner';
+          for (const q of items) inner.appendChild(Cards.build(q));
+        }
         section.appendChild(head);
         section.appendChild(inner);
         grid.appendChild(section);
@@ -1094,12 +1099,121 @@
         ${q.observe ? `<div class="qcard-observe"><span class="observe-tag">观察点</span>${Util.escapeHtml(q.observe)}</div>` : ''}
         <div class="qcard-meta-row"></div>
         <div class="qcard-result"></div>`;
-      card.querySelector('.qcard-details').addEventListener('click', (e) => {
+      Cards.wireCard(card, q);
+      return card;
+    },
+
+    wireCard(card, q) {
+      const details = card.querySelector('.qcard-details');
+      const run = card.querySelector('.qcard-run');
+      if (details) details.addEventListener('click', (e) => {
         e.stopPropagation(); Drawer.open(card);
       });
-      card.querySelector('.qcard-run').addEventListener('click', (e) => {
+      if (run) run.addEventListener('click', (e) => {
         e.stopPropagation(); Runner.runOne(q, card);
       });
+    },
+
+    buildImageMatrix(items) {
+      const qualities = [...new Set(items.map((q) => q.image && q.image.quality).filter(Boolean))];
+      const sizeMap = new Map();
+      for (const q of items) {
+        const meta = q.matrix || {};
+        const value = q.image && q.image.size;
+        if (value && !sizeMap.has(value)) sizeMap.set(value, Object.assign({ value }, meta));
+      }
+      const sizes = [...sizeMap.values()];
+      const qualityMeta = {
+        low: { code: 'L', label: 'Low', note: 'rapid draft' },
+        medium: { code: 'M', label: 'Medium', note: 'standard' },
+        high: { code: 'H', label: 'High', note: 'maximum detail' }
+      };
+
+      const figure = document.createElement('div');
+      figure.className = 'sci-matrix-figure';
+      const caption = document.createElement('div');
+      caption.className = 'sci-matrix-caption';
+      caption.innerHTML = `
+        <span class="sci-figure-no">FIG. 1</span>
+        <div class="sci-caption-copy">
+          <strong>Image-generation output parameter space</strong>
+          <span>Each cell is one independent URL-return probe using an identical prompt and <em>n</em> = 1.</span>
+        </div>
+        <div class="sci-legend"><i class="ok"></i> pass <i class="fail"></i> fail <i class="experimental"></i> experimental</div>`;
+      figure.appendChild(caption);
+
+      const scroller = document.createElement('div');
+      scroller.className = 'sci-matrix-scroll';
+      const matrix = document.createElement('div');
+      matrix.className = 'sci-matrix';
+      matrix.setAttribute('role', 'grid');
+      matrix.setAttribute('aria-label', 'Image quality by output size test matrix');
+      matrix.style.setProperty('--matrix-columns', String(sizes.length));
+
+      const corner = document.createElement('div');
+      corner.className = 'sci-matrix-corner';
+      corner.setAttribute('role', 'columnheader');
+      corner.innerHTML = '<span>QUALITY ↓</span><span>SIZE →</span>';
+      matrix.appendChild(corner);
+
+      for (const size of sizes) {
+        const head = document.createElement('div');
+        head.className = 'sci-size-head';
+        head.setAttribute('role', 'columnheader');
+        const display = size.value === 'auto' ? 'AUTO' : String(size.value).replace('x', ' × ');
+        head.innerHTML = `
+          <span class="sci-size-tier">${Util.escapeHtml(size.tier || '')}</span>
+          <strong>${Util.escapeHtml(display)}</strong>
+          <span>${Util.escapeHtml(size.label || '')}</span>
+          <small>${Util.escapeHtml(size.aspect || '')} · ${Util.escapeHtml(size.pixels || '')}</small>
+          ${size.experimental ? '<em>EXP.</em>' : ''}`;
+        matrix.appendChild(head);
+      }
+
+      for (const quality of qualities) {
+        const meta = qualityMeta[quality] || { code: quality.slice(0, 1).toUpperCase(), label: quality, note: '' };
+        const rowHead = document.createElement('div');
+        rowHead.className = 'sci-quality-head';
+        rowHead.setAttribute('role', 'rowheader');
+        rowHead.innerHTML = `<b>${Util.escapeHtml(meta.code)}</b><strong>${Util.escapeHtml(meta.label)}</strong><span>${Util.escapeHtml(meta.note)}</span>`;
+        matrix.appendChild(rowHead);
+        for (const size of sizes) {
+          const q = items.find((item) => item.image && item.image.quality === quality && item.image.size === size.value);
+          matrix.appendChild(q ? Cards.buildMatrixCell(q) : document.createElement('div'));
+        }
+      }
+
+      scroller.appendChild(matrix);
+      figure.appendChild(scroller);
+      const foot = document.createElement('div');
+      foot.className = 'sci-matrix-footnote';
+      foot.innerHTML = '<sup>a</sup> Sizes are the complete documented preset list; arbitrary multiples-of-16 are also accepted within model constraints. ' +
+        '<sup>b</sup> Outputs above 3,686,400 pixels are marked experimental. Total API latency is recorded per cell.';
+      figure.appendChild(foot);
+      return figure;
+    },
+
+    buildMatrixCell(q) {
+      const card = document.createElement('div');
+      card.className = 'qcard matrix-cell';
+      card.dataset.qid = q.id;
+      card.setAttribute('role', 'gridcell');
+      card.setAttribute('aria-label', `${q.image.quality} quality, ${q.image.size} size`);
+      const experimental = q.matrix && q.matrix.experimental;
+      card.innerHTML = `
+        <div class="matrix-cell-toolbar">
+          <span class="qcard-status"></span>
+          <span class="matrix-cell-code">${Util.escapeHtml(String(q.image.quality).slice(0, 1).toUpperCase())}·${Util.escapeHtml(q.matrix && q.matrix.tier || '')}</span>
+          ${experimental ? '<span class="matrix-cell-exp">EXP.</span>' : ''}
+          <div class="qcard-actions">
+            <button type="button" class="qcard-run">Run</button>
+            <button type="button" class="qcard-details" aria-label="详情">Data</button>
+          </div>
+        </div>
+        <div class="matrix-cell-empty"><span>URL · n=1</span><small>awaiting observation</small></div>
+        <div class="qcard-meta-row"></div>
+        <div class="qcard-result"></div>`;
+      Cards.wireCard(card, q);
       return card;
     },
 
@@ -1661,6 +1775,7 @@
     // view: 'test' | 'endpoints' | 'history' | 'admin'; group optional (for endpoints/test)
     show(view, group) {
       Store.activeView = view;
+      document.body.classList.toggle('image-lab-mode', view === 'test' && Store.activeGroup === 'Image');
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
       // nav highlight
       document.querySelectorAll('#group-nav .nav-item').forEach((b) =>

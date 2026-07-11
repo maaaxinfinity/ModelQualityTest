@@ -553,9 +553,14 @@ const IMAGE_RETURN_QUESTIONS = [
 
 const IMAGE_MATRIX_QUALITIES = ['low', 'medium', 'high'];
 const IMAGE_MATRIX_SIZES = [
-  { id: 'square', value: '1024x1024', label: '1K 方图' },
-  { id: 'landscape', value: '1536x1024', label: '横图' },
-  { id: 'portrait', value: '1024x1536', label: '竖图' }
+  { id: 'square-1k', value: '1024x1024', label: '1K square', aspect: '1:1', pixels: '1.05 MP', tier: '1K' },
+  { id: 'landscape-1536', value: '1536x1024', label: 'Landscape', aspect: '3:2', pixels: '1.57 MP', tier: '1.5K' },
+  { id: 'portrait-1536', value: '1024x1536', label: 'Portrait', aspect: '2:3', pixels: '1.57 MP', tier: '1.5K' },
+  { id: 'square-2k', value: '2048x2048', label: '2K square', aspect: '1:1', pixels: '4.19 MP', tier: '2K', experimental: true },
+  { id: 'landscape-2k', value: '2048x1152', label: '2K landscape', aspect: '16:9', pixels: '2.36 MP', tier: '2K' },
+  { id: 'landscape-4k', value: '3840x2160', label: '4K landscape', aspect: '16:9', pixels: '8.29 MP', tier: '4K', experimental: true },
+  { id: 'portrait-4k', value: '2160x3840', label: '4K portrait', aspect: '9:16', pixels: '8.29 MP', tier: '4K', experimental: true },
+  { id: 'auto', value: 'auto', label: 'Automatic', aspect: 'model', pixels: 'adaptive', tier: 'AUTO' }
 ];
 
 const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
@@ -569,6 +574,7 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
     description: `${size.label}，quality=${quality}`,
     prompt: IMAGE_MATRIX_PROMPT,
     image: { n: 1, quality, size: size.value, response_format: 'url' },
+    matrix: { quality, size: size.value, ...size },
     layout: 'image-matrix',
     observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本。'
   }))
