@@ -16,6 +16,7 @@ const {
 } = require('../api/_lib/providers');
 const { extractAllowedRows } = require('../api/_lib/pricing');
 const { issueSession } = require('../api/_lib/auth');
+const { buildImageReportTex, sanitizeImageReport } = require('../api/_lib/image-report');
 
 function fakeModelsDev() {
   return {
@@ -170,6 +171,79 @@ assert.deepEqual(nQuestions.map((q) => q.image.n), [2, 4, 8]);
 assert(nQuestions.every((q) =>
   q.image.quality === 'low' && q.image.size === '1024x1024' && q.image.response_format === 'url'
 ));
+
+const reportImages = Array.from({ length: 8 }, (_, index) => ({
+  src: `data:image/png;base64,${Buffer.from(`report-image-${index}`).toString('base64')}`,
+  index,
+  response_format: 'b64_json',
+  width: 1024,
+  height: 1024,
+  mime_type: 'image/png'
+}));
+const sanitizedReport = sanitizeImageReport({
+  generated_at: '2026-07-11T00:00:00.000Z',
+  expected_probe_count: 33,
+  results: [{
+    question_id: 'image-n-8',
+    question_name: 'n=8',
+    category: 'n 多图与耗时',
+    endpoint_name: 'Report endpoint',
+    model_id: 'selected-image-model',
+    endpoint_type: 'openai_images',
+    ok: true,
+    response_status: 200,
+    elapsed_ms: 8000,
+    probe: {
+      requested_n: 8,
+      returned_n: 8,
+      requested_format: 'b64_json',
+      returned_formats: Array(8).fill('b64_json'),
+      quality: 'low',
+      requested_size: '1024x1024',
+      actual_sizes: Array(8).fill('1024x1024'),
+      count_ok: true,
+      format_ok: true,
+      size_ok: true
+    },
+    images: reportImages
+  }]
+});
+assert.equal(sanitizedReport.results[0].images.length, 8, 'report sanitizer must preserve every n=8 image');
+const reportTex = buildImageReportTex(sanitizedReport, {
+  records: [{
+    rowIndex: 0,
+    inputs: [],
+    outputs: reportImages.map((image, index) => ({
+      file: `output-${index + 1}.jpg`,
+      title: `Output ${index + 1}`,
+      caption: `${image.response_format} · 1024x1024`
+    }))
+  }],
+  errors: [],
+  previewProfile: { width: 600, quality: 58 }
+});
+for (let index = 1; index <= 8; index++) {
+  assert(reportTex.includes(`output-${index}.jpg`), `report TeX missing output image ${index}`);
+}
+const placeholderTex = buildImageReportTex(sanitizedReport, {
+  records: [{
+    rowIndex: 0,
+    inputs: [],
+    outputs: [{
+      file: null,
+      title: 'Output 1',
+      caption: '无可用输出图',
+      note: '报告生成时未能读取 Output 1'
+    }]
+  }],
+  errors: ['unavailable output'],
+  previewProfile: { width: 600, quality: 58 }
+});
+assert(placeholderTex.includes('无可用输出图'));
+assert(placeholderTex.includes('报告生成时未能读取 Output 1'));
+for (const phrase of ['风险', '建议', '优先级', '代表性']) {
+  assert(!reportTex.includes(phrase), `report TeX contains non-factual heading or wording: ${phrase}`);
+}
 
 const b64 = 'A'.repeat(200);
 const extractedB64 = extractImageArtifacts({ data: [{ b64_json: b64 }] }, { output_format: 'png' });

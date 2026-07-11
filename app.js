@@ -1634,6 +1634,8 @@
       const any = Store.batchRunning || Store.inflight.size > 0;
       Util.el('run-all').disabled = any;
       Util.el('stop').disabled = !any;
+      const reportButton = Util.el('export-image-report');
+      if (reportButton && reportButton.dataset.exporting !== 'true') reportButton.disabled = any;
       Cards.all().forEach((card) => {
         const btn = card.querySelector('.qcard-run');
         if (!card.classList.contains('busy')) btn.disabled = Store.batchRunning;
@@ -1814,6 +1816,166 @@
     URL.revokeObjectURL(url);
   }
 
+  function reportImagePreview(image) {
+    const source = image && typeof image === 'object' ? image : {};
+    const src = String(source.src || '');
+    const clean = {
+      src,
+      index: source.index,
+      response_format: source.response_format,
+      width: source.width,
+      height: source.height,
+      mime_type: source.mime_type
+    };
+    if (!src.startsWith('data:image/')) return Promise.resolve(clean);
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(null), 15000);
+      img.onload = () => {
+        clearTimeout(timer);
+        try {
+          const maxSide = 500;
+          const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+          const width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+          const height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext('2d');
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, width, height);
+          context.drawImage(img, 0, 0, width, height);
+          let preview = canvas.toDataURL('image/jpeg', 0.45);
+          if (preview.length > 450000) preview = canvas.toDataURL('image/jpeg', 0.32);
+          finish(Object.assign({}, clean, { src: preview, mime_type: 'image/jpeg' }));
+        } catch (error) {
+          finish(null);
+        }
+      };
+      img.onerror = () => {
+        clearTimeout(timer);
+        finish(null);
+      };
+      img.src = src;
+    });
+  }
+
+  async function collectImageReportRows() {
+    const imageQuestions = Store.questionsForGroup('Image');
+    const questionById = new Map(imageQuestions.map((question, index) => [question.id, { question, index }]));
+    const entries = [...Store.resultsById.entries()].filter(([key, result]) => {
+      const qid = result.question_id || key.split('::')[0];
+      const found = questionById.get(qid);
+      return (found && found.question.group === 'Image') || result.model_group === 'Image';
+    });
+    entries.sort((a, b) => {
+      const aqid = a[1].question_id || a[0].split('::')[0];
+      const bqid = b[1].question_id || b[0].split('::')[0];
+      const ai = questionById.has(aqid) ? questionById.get(aqid).index : Number.MAX_SAFE_INTEGER;
+      const bi = questionById.has(bqid) ? questionById.get(bqid).index : Number.MAX_SAFE_INTEGER;
+      return ai - bi || a[0].localeCompare(b[0]);
+    });
+
+    const rows = [];
+    for (const [key, result] of entries) {
+      const qid = result.question_id || key.split('::')[0];
+      const found = questionById.get(qid);
+      const question = found && found.question;
+      const images = [];
+      for (const image of Array.isArray(result.images) ? result.images : []) {
+        const preview = await reportImagePreview(image);
+        if (preview) images.push(preview);
+      }
+      rows.push({
+        question_id: qid,
+        question_name: (question && question.name) || result.question_name || qid,
+        category: (question && question.category) || '',
+        endpoint_name: result.endpoint_name || '',
+        model_id: result.model_id || '',
+        routed_model_id: result.routed_model_id || '',
+        endpoint_type: result.endpoint_type || (question && question.endpoint_type) || '',
+        edit_input_count: question && Array.isArray(question.edit_inputs) ? question.edit_inputs.length : null,
+        ok: result.ok === true,
+        response_status: result.response_status,
+        elapsed_ms: result.elapsed_ms,
+        estimated_cost_usd: result.estimated_cost_usd,
+        error_message: result.error_message || '',
+        manual_verdict: Store.getVerdict(key),
+        probe: result.image_probe || {},
+        images
+      });
+    }
+    return rows;
+  }
+
+  function reportFilename(disposition) {
+    const utf8 = String(disposition || '').match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8) {
+      try { return decodeURIComponent(utf8[1]); } catch (error) {}
+    }
+    const plain = String(disposition || '').match(/filename="?([^";]+)"?/i);
+    return plain ? plain[1] : `image-quality-report-${Date.now()}.pdf`;
+  }
+
+  async function exportImageReport() {
+    if (Store.activeGroup !== 'Image') return;
+    const button = Util.el('export-image-report');
+    const originalLabel = button.textContent;
+    button.dataset.exporting = 'true';
+    button.disabled = true;
+    button.textContent = '整理图片中…';
+    try {
+      const results = await collectImageReportRows();
+      if (!results.length) throw new Error('当前没有 Image 测试结果');
+      const payload = JSON.stringify({
+        action: 'image_report',
+        report: {
+          generated_at: new Date().toISOString(),
+          expected_probe_count: Store.questionsForGroup('Image').length,
+          results
+        }
+      });
+      if (new Blob([payload]).size > 4_000_000) {
+        throw new Error('报告数据超过 4 MB，请清空后仅保留本轮 Image 结果再导出');
+      }
+
+      button.textContent = 'TeX 排版中…';
+      UI.flash('TeX 排版中…', 'running');
+      const response = await fetch('/api/run-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || response.statusText);
+      }
+      const pdf = await response.blob();
+      const url = URL.createObjectURL(pdf);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = reportFilename(response.headers.get('Content-Disposition'));
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      UI.flash(`PDF 已下载 · ${(pdf.size / 1024 / 1024).toFixed(2)} MB`, 'done');
+    } catch (error) {
+      UI.flash(`报告生成失败 · ${Util.errText(error)}`, 'error');
+    } finally {
+      delete button.dataset.exporting;
+      button.disabled = Store.batchRunning || Store.inflight.size > 0;
+      button.textContent = originalLabel;
+    }
+  }
+
   /* ───────────────────────── Router (views) ───────────────────────── */
   const VIEW_META = {
     endpoints: { title: '端点管理', desc: '配置各分组的 Base URL、模型、鉴权与 API Key，保存到数据库（全局共享）。' },
@@ -1826,6 +1988,8 @@
     show(view, group) {
       Store.activeView = view;
       document.body.classList.toggle('image-lab-mode', view === 'test' && Store.activeGroup === 'Image');
+      const reportButton = Util.el('export-image-report');
+      if (reportButton) reportButton.hidden = Store.activeGroup !== 'Image';
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
       // nav highlight
       document.querySelectorAll('#group-nav .nav-item').forEach((b) =>
@@ -1910,6 +2074,7 @@
     Util.el('stop').addEventListener('click', Runner.stop);
     Util.el('clear-results').addEventListener('click', Cards.clearResults);
     Util.el('export-results').addEventListener('click', exportLocalResults);
+    Util.el('export-image-report').addEventListener('click', exportImageReport);
 
     Util.el('filter-category').addEventListener('change', Cards.applyFilter);
 

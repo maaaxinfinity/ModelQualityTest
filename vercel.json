@@ -2,7 +2,7 @@
   "functions": {
     "api/run-test.js": {
       "maxDuration": 300,
-      "includeFiles": "assets/image-edit/**"
+      "includeFiles": "{assets/image-edit/**,vendor/tectonic/**}"
     },
     "api/admin/prices.js": {
       "maxDuration": 300

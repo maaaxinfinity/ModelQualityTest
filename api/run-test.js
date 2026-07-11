@@ -130,6 +130,21 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     return sendJson(res, 400, { error: 'bad_json', detail: e.message });
   }
+  if (payload.action === 'image_report') {
+    try {
+      const { compileImageReport } = require('./_lib/image-report');
+      const report = await compileImageReport(payload.report);
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
+      res.setHeader('Content-Length', report.pdf.length);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.end(report.pdf);
+    } catch (error) {
+      return sendJson(res, 500, { error: 'image_report_failed', detail: error.message });
+    }
+  }
   const question = payload.question || {};
   const cfg = payload.cfg || {};
   if (!question.id) return sendJson(res, 400, { error: 'missing_question' });

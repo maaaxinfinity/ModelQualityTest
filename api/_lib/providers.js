@@ -853,6 +853,7 @@ module.exports = {
   normalizeUsage,
   sanitizePayload,
   extractImageArtifacts,
+  fetchImageBytes,
   inspectImageDimensions,
   parseImageDimensions,
   summarizeImageProbe,

@@ -26,6 +26,8 @@ checkFile('schema.sql');
 checkFile('index.html');
 checkFile('app.js');
 checkFile('questions.js');
+checkFile('api/_lib/image-report.js');
+checkFile('scripts/install-tectonic.js');
 for (const file of [
   'scene-b.png', 'object-fox.png', 'object-orb.png', 'object-rocket.png',
   'object-cactus.png', 'object-robot.png', 'object-compass.png', 'object-mug.png'
@@ -35,18 +37,34 @@ for (const file of [
 
 const pkg = readJson('package.json');
 assert(pkg.dependencies && pkg.dependencies.pg, 'pg dependency missing');
-assert(pkg.scripts && pkg.scripts.check && pkg.scripts['test:logic'] && pkg.scripts['test:db'], 'expected npm scripts missing');
+assert(pkg.dependencies && pkg.dependencies.sharp, 'sharp dependency missing');
+assert(
+  pkg.scripts && pkg.scripts.check && pkg.scripts.postinstall &&
+  pkg.scripts['test:logic'] && pkg.scripts['test:report'] && pkg.scripts['test:db'],
+  'expected npm scripts missing'
+);
 ok('package scripts');
 
 const vercel = readJson('vercel.json');
 assert(vercel.functions && vercel.functions['api/run-test.js'], 'run-test function config missing');
-assert(vercel.functions['api/run-test.js'].includeFiles === 'assets/image-edit/**', 'run-test edit fixtures must be bundled');
+assert(
+  vercel.functions['api/run-test.js'].includeFiles === '{assets/image-edit/**,vendor/tectonic/**}',
+  'run-test edit fixtures and Tectonic bundle must be included'
+);
 assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync'), 'combined sync cron missing');
 // Hobby plan caps a deployment at 12 serverless functions.
 const fnCount = fs.readdirSync(path.join(process.cwd(), 'api'), { recursive: true })
   .filter((f) => String(f).endsWith('.js') && !String(f).replace(/\\/g, '/').includes('_lib/')).length;
 assert(fnCount <= 12, `too many serverless functions: ${fnCount} > 12 (Hobby plan cap)`);
 ok('vercel config', `${fnCount} functions`);
+
+if (process.platform === 'linux' && process.arch === 'x64') {
+  checkFile('vendor/tectonic/tectonic');
+  checkFile('vendor/tectonic/install.json');
+  assert(fs.existsSync(path.join(process.cwd(), 'vendor', 'tectonic', 'cache', 'Tectonic', 'formats')), 'Tectonic offline cache missing');
+  assert(fs.statSync(path.join(process.cwd(), 'vendor', 'tectonic', 'tectonic')).size > 20 * 1024 * 1024, 'Tectonic binary is incomplete');
+  ok('Tectonic offline bundle');
+}
 
 global.window = global;
 require('../questions.js');
