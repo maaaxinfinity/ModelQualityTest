@@ -521,7 +521,7 @@ const SAKANA_QUESTIONS = [
   }
 ];
 
-const IMAGE_MATRIX_PROMPT =
+const IMAGE_RETURN_PROMPT =
   'A studio product photograph of a translucent cobalt-blue glass cube on a pale stone pedestal, soft directional light, clean neutral background, no text.';
 
 const IMAGE_RETURN_QUESTIONS = [
@@ -533,7 +533,7 @@ const IMAGE_RETURN_QUESTIONS = [
     category: '回图能力',
     name: 'Base64 回图',
     description: '验证 response_format=b64_json，并在网页直接渲染图片',
-    prompt: IMAGE_MATRIX_PROMPT,
+    prompt: IMAGE_RETURN_PROMPT,
     image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'b64_json' },
     observe: '通过条件：HTTP 成功、返回 1 张 b64_json 图片且前端可显示；数据库只记录 Base64 长度。'
   },
@@ -545,7 +545,7 @@ const IMAGE_RETURN_QUESTIONS = [
     category: '回图能力',
     name: 'URL 回图',
     description: '验证 response_format=url，并在网页加载返回 URL',
-    prompt: IMAGE_MATRIX_PROMPT,
+    prompt: IMAGE_RETURN_PROMPT,
     image: { n: 1, quality: 'low', size: '1024x1024', response_format: 'url' },
     observe: '通过条件：HTTP 成功、返回 1 个图片 URL 且前端可显示。URL 可能具有有效期。'
   }
@@ -632,6 +632,14 @@ const IMAGE_EDIT_QUESTIONS = [
 ];
 
 const IMAGE_MATRIX_QUALITIES = ['low', 'medium', 'high'];
+const IMAGE_MATRIX_COLORS = [
+  'ruby-red', 'tangerine-orange', 'golden-amber', 'lemon-yellow',
+  'chartreuse-green', 'emerald-green', 'turquoise', 'cyan',
+  'sky-blue', 'cobalt-blue', 'sapphire-blue', 'indigo',
+  'violet', 'amethyst-purple', 'magenta', 'fuchsia-pink',
+  'rose-pink', 'coral', 'burgundy-red', 'copper-brown',
+  'mint-green', 'seafoam-green', 'lavender', 'smoky-gray'
+];
 const IMAGE_MATRIX_SIZES = [
   { id: 'square-1k', value: '1024x1024', label: '1K square', aspect: '1:1', pixels: '1.05 MP', tier: '1K' },
   { id: 'landscape-1536', value: '1536x1024', label: 'Landscape', aspect: '3:2', pixels: '1.57 MP', tier: '1.5K' },
@@ -643,22 +651,25 @@ const IMAGE_MATRIX_SIZES = [
   { id: 'auto', value: 'auto', label: 'Automatic', aspect: 'model', pixels: 'adaptive', tier: 'AUTO' }
 ];
 
-const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
-  IMAGE_MATRIX_SIZES.map((size) => ({
-    id: `image-matrix-${quality}-${size.id}`,
-    group: 'Image',
-    provider: 'openai',
-    endpoint_type: 'openai_images',
-    category: 'Quality × Size 矩阵',
-    name: `${quality} · ${size.value}`,
-    description: `${size.label}，quality=${quality}`,
-    prompt: IMAGE_MATRIX_PROMPT,
-    image: { n: 1, quality, size: size.value, response_format: 'url' },
-    matrix: { quality, size: size.value, ...size },
-    layout: 'image-matrix',
-    validate: { size: true },
-    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本；显式尺寸必须与返回图片实际像素完全一致，auto 只要能读取到实际尺寸即通过。'
-  }))
+const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality, qualityIndex) =>
+  IMAGE_MATRIX_SIZES.map((size, sizeIndex) => {
+    const color = IMAGE_MATRIX_COLORS[qualityIndex * IMAGE_MATRIX_SIZES.length + sizeIndex];
+    return {
+      id: `image-matrix-${quality}-${size.id}`,
+      group: 'Image',
+      provider: 'openai',
+      endpoint_type: 'openai_images',
+      category: 'Quality × Size 矩阵',
+      name: `${quality} · ${size.value}`,
+      description: `${size.label}，quality=${quality}，cube=${color}`,
+      prompt: `A studio product photograph of a translucent ${color} glass cube on a pale stone pedestal, soft directional light, clean neutral background, no text.`,
+      image: { n: 1, quality, size: size.value, response_format: 'url' },
+      matrix: { quality, size: size.value, color, ...size },
+      layout: 'image-matrix',
+      validate: { size: true },
+      observe: '使用相同构图和固定格点颜色的 Prompt 与 URL 回图，对比生成质量、尺寸支持、总耗时与成本；显式尺寸必须与返回图片实际像素完全一致，auto 只要能读取到实际尺寸即通过。'
+    };
+  })
 );
 
 const IMAGE_N_QUESTIONS = [2, 4, 8].map((n) => ({

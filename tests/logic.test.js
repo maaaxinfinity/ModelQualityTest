@@ -165,6 +165,9 @@ assert.deepEqual(
 );
 assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format === 'url'));
 assert(matrixQuestions.every((q) => q.validate && q.validate.size === true));
+assert.equal(new Set(matrixQuestions.map((q) => q.matrix.color)).size, 24);
+assert.equal(new Set(matrixQuestions.map((q) => q.prompt)).size, 24);
+assert(matrixQuestions.every((q) => q.prompt.includes(`translucent ${q.matrix.color} glass cube`)));
 
 const nQuestions = QUESTIONS.filter((q) => q.category === 'n 多图与耗时');
 assert.deepEqual(nQuestions.map((q) => q.image.n), [2, 4, 8]);
