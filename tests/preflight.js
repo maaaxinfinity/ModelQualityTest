@@ -61,10 +61,7 @@ ok('vercel config', `${fnCount} functions`);
 
 const appSource = fs.readFileSync(path.join(process.cwd(), 'app.js'), 'utf8');
 const reportSource = fs.readFileSync(path.join(process.cwd(), 'api', '_lib', 'image-report.js'), 'utf8');
-assert(appSource.includes('Store.runningGroup'), 'cross-group run lock missing');
-assert(appSource.includes('Store.runningCategory'), 'cross-category run lock missing');
-assert(appSource.includes('Store.activeRuns'), 'active run counter missing');
-assert(appSource.includes('Never cross category/task-group boundaries'), 'category phase scheduler missing');
+assert(appSource.includes('One shared queue: workers may take questions from different categories'), 'cross-category scheduler missing');
 assert(!reportSource.includes('.resize({'), 'PDF report must not resize source images');
 assert(!reportSource.includes('.jpeg({'), 'PDF report must not JPEG-recompress source images');
 ok('image report originals and group scheduling');

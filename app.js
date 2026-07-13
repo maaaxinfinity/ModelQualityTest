@@ -200,9 +200,6 @@
     inflight: new Set(),
     stopFlag: false,
     batchRunning: false,
-    runningGroup: null,
-    runningCategory: null,
-    activeRuns: 0,
 
     defaultConfig(group) {
       return Object.assign({
@@ -1652,18 +1649,14 @@
       if (wrap) wrap.hidden = true;
     },
     refreshControls() {
-      const any = Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0;
+      const any = Store.batchRunning || Store.inflight.size > 0;
       Util.el('run-all').disabled = any;
       Util.el('stop').disabled = !any;
       const reportButton = Util.el('export-image-report');
       if (reportButton && reportButton.dataset.exporting !== 'true') reportButton.disabled = any;
       Cards.all().forEach((card) => {
         const btn = card.querySelector('.qcard-run');
-        const categoryBlocked = Store.runningCategory && card.dataset.category !== Store.runningCategory;
-        if (!card.classList.contains('busy')) btn.disabled = Store.batchRunning || !!categoryBlocked;
-      });
-      document.querySelectorAll('#group-nav .nav-item').forEach((button) => {
-        button.disabled = !!(Store.runningGroup && button.dataset.group !== Store.runningGroup);
+        if (!card.classList.contains('busy')) btn.disabled = Store.batchRunning;
       });
     }
   };
@@ -1695,18 +1688,8 @@
     // Run one question across every selected endpoint and render them side-by-side.
     async runOne(q, card) {
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      if (Store.runningGroup && Store.runningGroup !== q.group) {
-        return UI.flash(`正在运行 ${Store.runningGroup}，不能跨任务组并发`, 'error');
-      }
-      const category = q.category || '未分类';
-      if (Store.runningCategory && Store.runningCategory !== category) {
-        return UI.flash(`正在运行 ${Store.runningCategory}，不能跨任务组并发`, 'error');
-      }
       const targets = Runner.selectedTargets(q.group);
       if (!targets) return;
-      Store.runningGroup = q.group;
-      Store.runningCategory = category;
-      Store.activeRuns++;
       Store.stopFlag = false;
       Cards.setBusy(card, true);
       Cards.renderTargets(card, targets);
@@ -1723,11 +1706,6 @@
         UI.flash(okAll ? `完成 · ${q.name}` : `失败 · ${q.name}`, okAll ? 'done' : 'error');
       } finally {
         Cards.setBusy(card, false);
-        Store.activeRuns = Math.max(0, Store.activeRuns - 1);
-        if (!Store.batchRunning && Store.activeRuns === 0) {
-          Store.runningGroup = null;
-          Store.runningCategory = null;
-        }
         UI.refreshControls();
       }
     },
@@ -1761,17 +1739,13 @@
     },
 
     async runGroup() {
-      if (Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0) return;
+      if (Store.batchRunning) return;
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
       const runningGroup = Store.activeGroup;
-      if (Store.runningGroup && Store.runningGroup !== runningGroup) {
-        return UI.flash(`正在运行 ${Store.runningGroup}，不能跨任务组并发`, 'error');
-      }
       const targets = Runner.selectedTargets(runningGroup);
       if (!targets) return;
       Store.stopFlag = false;
       Store.batchRunning = true;
-      Store.runningGroup = runningGroup;
       UI.refreshControls();
 
       const qs = Store.questionsForGroup(runningGroup).filter((q) => !Cards.isHiddenByFilter(q));
@@ -1789,45 +1763,34 @@
             if (idx >= phaseQuestions.length) return;
             const q = phaseQuestions[idx];
             const card = Cards.forId(q.id);
-            if (!card) continue;
-            Cards.setBusy(card, true);
-            Cards.renderTargets(card, targets);
+            if (card) {
+              Cards.setBusy(card, true);
+              Cards.renderTargets(card, targets);
+            }
             UI.flash(`${done}/${total} · ${q.name}`, 'running');
             const list = await Runner.runAcross(q, targets, batchId, {
-              onStart: (key) => Cards.markResultRunning(card, key),
+              onStart: (key) => { if (card) Cards.markResultRunning(card, key); },
               onDone: (key, endpoint, model, result) => {
-                Cards.fillResultRow(card, key, endpoint, model, result);
+                if (card) Cards.fillResultRow(card, key, endpoint, model, result);
                 done++;
                 UI.flash(`${done}/${total}`, 'running');
                 UI.progress(done, total);
               }
             });
-            Cards.renderResults(card, list);
-            Cards.setBusy(card, false);
+            if (card) {
+              Cards.renderResults(card, list);
+              Cards.setBusy(card, false);
+            }
           }
         };
         await Promise.all(Array.from({ length: Math.min(phaseConcurrency, phaseQuestions.length) }, worker));
       };
 
-      // Never cross category/task-group boundaries: finish one section before
-      // scheduling work from the next. Concurrency only applies within a phase.
-      const phases = [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>
-        qs.filter((q) => (q.category || '未分类') === category));
       try {
-        for (const phase of phases) {
-          if (Store.stopFlag) break;
-          Store.runningCategory = (phase[0] && phase[0].category) || '未分类';
-          UI.refreshControls();
-          const phaseConcurrency = runningGroup === 'Image' && phase[0] &&
-            ['Edit 多图输入', 'n 多图与耗时'].includes(phase[0].category)
-            ? 1
-            : concurrency;
-          await runPhase(phase, phaseConcurrency);
-        }
+        // One shared queue: workers may take questions from different categories.
+        await runPhase(qs, concurrency);
       } finally {
         Store.batchRunning = false;
-        Store.runningCategory = null;
-        if (Store.inflight.size === 0) Store.runningGroup = null;
         UI.refreshControls();
       }
       UI.flash(Store.stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, Store.stopFlag ? 'error' : 'done');
@@ -1983,7 +1946,7 @@
       UI.flash(`报告生成失败 · ${Util.errText(error)}`, 'error');
     } finally {
       delete button.dataset.exporting;
-      button.disabled = Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0;
+      button.disabled = Store.batchRunning || Store.inflight.size > 0;
       button.textContent = originalLabel;
     }
   }
@@ -2042,10 +2005,6 @@
   }
 
   function applyGroup(group, silent) {
-    if (Store.runningGroup && Store.runningGroup !== group) {
-      if (!silent) UI.flash(`正在运行 ${Store.runningGroup}，请先停止后再切换任务组`, 'error');
-      return;
-    }
     Store.activeGroup = group;
     document.body.dataset.group = group;
     const title = Util.el('page-title');
@@ -2055,6 +2014,7 @@
     Cards.renderList();
     Picker.render();
     Router.show('test');
+    UI.refreshControls();
     if (!silent) UI.flash(group, 'done');
   }
 
