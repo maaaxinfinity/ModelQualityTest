@@ -657,7 +657,7 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality) =>
     matrix: { quality, size: size.value, ...size },
     layout: 'image-matrix',
     validate: { size: true },
-    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本；显式尺寸必须与返回图片实际像素完全一致，auto 校验合法像素约束。'
+    observe: '使用相同 Prompt 和 URL 回图，对比生成质量、尺寸支持、总耗时与成本；显式尺寸必须与返回图片实际像素完全一致，auto 只要能读取到实际尺寸即通过。'
   }))
 );
 

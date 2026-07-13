@@ -297,12 +297,15 @@ const wrongSizeProbe = summarizeImageProbe(sizedImage, {
 }, 900, { validateSize: true });
 assert.equal(wrongSizeProbe.probe.size_ok, false);
 assert.match(wrongSizeProbe.error, /expected size=1024x1024, received 1536x1024/);
-const autoSizeProbe = summarizeImageProbe(sizedImage, {
+const autoSizedImage = [{ response_format: 'url', src: 'https://images.example.test/auto.png', width: 1122, height: 1402 }];
+const autoSizeProbe = summarizeImageProbe(autoSizedImage, {
   n: 1,
   size: 'auto',
   response_format: 'url'
 }, 900, { validateSize: true });
 assert.equal(autoSizeProbe.probe.size_ok, true);
+assert.equal(autoSizeProbe.error, null);
+assert.deepEqual(autoSizeProbe.probe.actual_sizes, ['1122x1402']);
 
 const sakanaRequest = buildUpstreamRequest(QUESTIONS.find((q) => q.id === 'sakana-fugu-basic'), cfgFor('Sakana'));
 assert.equal(sakanaRequest.endpoint, 'https://api.sakana.ai/v1/responses');

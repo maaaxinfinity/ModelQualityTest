@@ -568,16 +568,6 @@ async function inspectImageDimensions(images) {
   return artifacts;
 }
 
-function autoSizeIsValid(value) {
-  const match = String(value || '').match(/^(\d+)x(\d+)$/);
-  if (!match) return false;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  const ratio = width / height;
-  return width % 16 === 0 && height % 16 === 0 && ratio >= 1 / 3 && ratio <= 3 &&
-    Math.max(width, height) <= 3840 && width * height <= 3840 * 2160;
-}
-
 function summarizeImageProbe(images, requestBody, elapsedMs, options = {}) {
   const artifacts = Array.isArray(images) ? images : [];
   const requestedN = Math.max(1, Number(requestBody && requestBody.n) || 1);
@@ -592,9 +582,7 @@ function summarizeImageProbe(images, requestBody, elapsedMs, options = {}) {
   const validateSize = !!options.validateSize;
   const sizeOk = !validateSize ? null : (
     artifacts.length > 0 && actualSizes.every(Boolean) &&
-    (requestedSize === 'auto'
-      ? actualSizes.every(autoSizeIsValid)
-      : actualSizes.every((size) => size === requestedSize))
+    (requestedSize === 'auto' || actualSizes.every((size) => size === requestedSize))
   );
   const probe = {
     requested_n: requestedN,
