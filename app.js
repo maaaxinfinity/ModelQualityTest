@@ -1890,15 +1890,6 @@
     return rows;
   }
 
-  function reportFilename(disposition) {
-    const utf8 = String(disposition || '').match(/filename\*=UTF-8''([^;]+)/i);
-    if (utf8) {
-      try { return decodeURIComponent(utf8[1]); } catch (error) {}
-    }
-    const plain = String(disposition || '').match(/filename="?([^";]+)"?/i);
-    return plain ? plain[1] : `image-quality-report-${Date.now()}.pdf`;
-  }
-
   async function exportImageReport() {
     if (Store.activeGroup !== 'Image') return;
     const button = Util.el('export-image-report');
@@ -1932,16 +1923,17 @@
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail || body.error || response.statusText);
       }
-      const pdf = await response.blob();
-      const url = URL.createObjectURL(pdf);
+      const body = await response.json();
+      if (!body.report || !body.report.url) throw new Error('报告上传成功但未返回下载链接');
       const link = document.createElement('a');
-      link.href = url;
-      link.download = reportFilename(response.headers.get('Content-Disposition'));
+      link.href = body.report.url;
+      link.download = body.report.filename || `image-quality-report-${Date.now()}.pdf`;
+      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
       link.click();
       link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      UI.flash(`PDF 已下载 · ${(pdf.size / 1024 / 1024).toFixed(2)} MB`, 'done');
+      const sizeMb = Number(body.report.size || 0) / 1024 / 1024;
+      UI.flash(`PDF 已上传并开始下载 · ${sizeMb.toFixed(2)} MB`, 'done');
     } catch (error) {
       UI.flash(`报告生成失败 · ${Util.errText(error)}`, 'error');
     } finally {

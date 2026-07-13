@@ -12,6 +12,7 @@
     "test:db": "node tests/db-smoke.js && node tests/auth-smoke.js && node tests/run-test-smoke.js"
   },
   "dependencies": {
+    "@vercel/blob": "^2.6.1",
     "pg": "^8.13.1",
     "sharp": "^0.35.3"
   },

@@ -9,6 +9,7 @@ const {
   MAX_PDF_BYTES,
   compileImageReport
 } = require('../api/_lib/image-report');
+const { REPORT_URL_TTL_MS, safeFilename, storeImageReport } = require('../api/_lib/report-storage');
 
 const fixtureFiles = [
   'scene-b.png',
@@ -110,6 +111,30 @@ async function main() {
   }
   assert.equal(generated.pdf.subarray(0, 4).toString('ascii'), '%PDF');
   assert(generated.pdf.length <= MAX_PDF_BYTES, `PDF exceeds ${MAX_PDF_BYTES} bytes`);
+
+  const calls = [];
+  const stored = await storeImageReport(Buffer.from('%PDF-test'), 'Report 2026.pdf', {
+    async put(pathname, body, options) {
+      calls.push({ type: 'put', pathname, body, options });
+      return { pathname: 'image-reports/report-2026-random.pdf' };
+    },
+    async issueSignedToken(options) {
+      calls.push({ type: 'token', options });
+      return { clientSigningToken: 'client', delegationToken: 'delegation' };
+    },
+    async presignUrl(token, options) {
+      calls.push({ type: 'presign', token, options });
+      return { presignedUrl: 'https://private.example.test/report.pdf?signature=test' };
+    },
+    getDownloadUrl(url) { return `${url}&download=1`; }
+  });
+  assert.equal(safeFilename('Report 2026'), 'Report-2026.pdf');
+  assert.equal(stored.pathname, 'image-reports/report-2026-random.pdf');
+  assert.equal(stored.url, 'https://private.example.test/report.pdf?signature=test&download=1');
+  assert.equal(stored.size, Buffer.byteLength('%PDF-test'));
+  assert(calls[0].options.multipart && calls[0].options.access === 'private');
+  assert(calls[1].options.validUntil - Date.now() <= REPORT_URL_TTL_MS);
+  assert.equal(calls[2].options.operation, 'get');
 
   const pdfPath = '/tmp/model-quality-image-report-test.pdf';
   const texPath = '/tmp/model-quality-image-report-test.tex';

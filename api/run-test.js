@@ -133,15 +133,12 @@ module.exports = async function handler(req, res) {
   if (payload.action === 'image_report') {
     try {
       const { compileImageReport } = require('./_lib/image-report');
+      const { storeImageReport } = require('./_lib/report-storage');
       const report = await compileImageReport(payload.report);
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
-      res.setHeader('Content-Length', report.pdf.length);
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      return res.end(report.pdf);
+      const stored = await storeImageReport(report.pdf, report.filename);
+      return sendJson(res, 200, { ok: true, report: stored });
     } catch (error) {
+      console.error('image_report_failed', error && (error.stack || error.message || error));
       return sendJson(res, 500, { error: 'image_report_failed', detail: error.message });
     }
   }

@@ -27,6 +27,7 @@ checkFile('index.html');
 checkFile('app.js');
 checkFile('questions.js');
 checkFile('api/_lib/image-report.js');
+checkFile('api/_lib/report-storage.js');
 checkFile('scripts/install-tectonic.js');
 for (const file of [
   'scene-b.png', 'object-fox.png', 'object-orb.png', 'object-rocket.png',
@@ -91,15 +92,18 @@ ok('question groups', JSON.stringify(groups));
 
 const env = {
   DATABASE_URL: !!process.env.DATABASE_URL,
+  BLOB_READ_WRITE_TOKEN: !!process.env.BLOB_READ_WRITE_TOKEN,
   SESSION_SECRET: !!(process.env.SESSION_SECRET || process.env.AUTH_SECRET),
   CRON_SECRET: !!process.env.CRON_SECRET
 };
 if (strictEnv) {
   assert(env.DATABASE_URL, 'DATABASE_URL missing');
+  assert(env.BLOB_READ_WRITE_TOKEN, 'BLOB_READ_WRITE_TOKEN missing');
   assert(env.SESSION_SECRET, 'SESSION_SECRET or AUTH_SECRET missing');
   ok('strict env', JSON.stringify(env));
 } else {
   if (!env.DATABASE_URL) warn('DATABASE_URL missing', 'required on Vercel');
+  if (!env.BLOB_READ_WRITE_TOKEN) warn('BLOB_READ_WRITE_TOKEN missing', 'required for full-quality PDF exports');
   if (!env.SESSION_SECRET) warn('SESSION_SECRET or AUTH_SECRET missing', 'required on Vercel production');
   if (!env.CRON_SECRET) warn('CRON_SECRET missing', 'optional but recommended for cron endpoint');
 }

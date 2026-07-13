@@ -10,6 +10,7 @@ Multi-provider model quality probe for five groups: OpenAI, Anthropic, Google, S
 - Sakana tests target Fugu through an OpenAI-compatible Responses shape.
 - Image probes inherit the model selected for each endpoint (`gpt-image-2` remains the default, but is not forced) and run in four ordered stages: Base64/URL return capability; real `/v1/images/edits` compositing with `1/2/4/8` input images; a `quality` (`low`/`medium`/`high`) × size matrix (`1024x1024`, `1536x1024`, `1024x1536`, `2048x2048`, `2048x1152`, `3840x2160`, `2160x3840`, `auto`); then output `n=2/4/8` at 1K low quality. The 24 matrix cells use a fixed palette of distinct cube colors while keeping the rest of the composition unchanged. Edit inputs use a fixed target scene and seven distinct reference objects, render beside the result, and run serially for comparable latency. The server downloads every returned image (or decodes Base64), records its actual byte size and PNG/JPEG/WebP dimensions, and fails explicit-size cells unless returned pixels exactly match; `auto` accepts any successfully parsed dimensions selected by the model. File sizes render with each result. PDF export embeds original PNG/JPEG bytes without resizing or quality reduction; WebP is converted losslessly to PNG only for TeX compatibility. Image bytes are never persisted to PostgreSQL logs.
 - Batch concurrency uses one shared queue across all currently visible test categories; workers may execute questions from different task groups at the same time.
+- Full-quality PDF reports are uploaded to a private Vercel Blob store and returned as 24-hour signed download URLs, avoiding serverless response-size limits.
 - Text test requests (OpenAI Responses, Anthropic Messages, Google, Sakana) are issued as **streaming (SSE)** calls; the server reassembles the stream into the same final JSON a buffered call would return, so usage/cost/logging are unchanged. Image generation stays non-streaming. Anthropic requests send the `claude-cli/2.1.198 (external, cli)` User-Agent.
 - Every test run is logged to PostgreSQL and can be exported from the admin panel.
 - Cost estimates are calculated from a local PostgreSQL `model_prices` table synchronized from `https://models.dev/api.json`.
@@ -61,6 +62,7 @@ npx vercel install neon --name model-quality-test-db --environment production --
 Configure:
 
 - `DATABASE_URL`: PostgreSQL connection string.
+- `BLOB_READ_WRITE_TOKEN`: private Vercel Blob store token used for full-quality PDF report uploads.
 - `SESSION_SECRET`: HMAC secret for signed session cookies.
 - Optional `CRON_SECRET`: protects the Vercel cron endpoint. Vercel Cron sends it as a bearer token when configured.
 - Optional `PGSSLMODE=disable` for local non-SSL PostgreSQL.
