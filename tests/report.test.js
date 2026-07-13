@@ -36,7 +36,8 @@ function reportRow(question, questionIndex) {
     response_format: responseFormat,
     width: Number(actualSize.split('x')[0]) || 1024,
     height: Number(actualSize.split('x')[1]) || 1024,
-    mime_type: 'image/png'
+    mime_type: 'image/png',
+    byte_size: Buffer.from(fixtureUris[(questionIndex + imageIndex) % fixtureUris.length].split(',')[1], 'base64').length
   }));
   return {
     question_id: question.id,
@@ -62,6 +63,7 @@ function reportRow(question, questionIndex) {
       size: requestedSize,
       requested_size: requestedSize,
       actual_sizes: Array(requestedN).fill(actualSize),
+      actual_bytes: images.map((image) => image.byte_size),
       elapsed_ms: 1200 + questionIndex * 37,
       ms_per_image: Math.round((1200 + questionIndex * 37) / requestedN),
       count_ok: true,
@@ -92,6 +94,9 @@ async function main() {
     [1, 2, 4, 8]
   );
   assert(generated.figures.records.flatMap((record) => record.outputs).every((item) => item.file));
+  assert(generated.figures.originalQuality === true);
+  assert(generated.figures.records.flatMap((record) => record.outputs).every((item) => item.file.endsWith('.png')));
+  assert(generated.figures.records.flatMap((record) => record.outputs).every((item) => /KB|MB| B/.test(item.caption)));
   for (const question of imageQuestions) {
     assert(generated.tex.includes(question.id), `TeX missing test point ${question.id}`);
   }

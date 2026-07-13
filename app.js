@@ -45,6 +45,13 @@
       if (n < 0.000001) return n.toExponential(2);
       return n.toFixed(6);
     },
+    formatBytes(value) {
+      const bytes = Number(value);
+      if (!Number.isFinite(bytes) || bytes < 0) return '';
+      if (bytes < 1024) return `${Math.round(bytes)} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    },
     highlightJson(value) {
       let s;
       try { s = JSON.stringify(value, null, 2); } catch (e) { s = String(value); }
@@ -193,6 +200,9 @@
     inflight: new Set(),
     stopFlag: false,
     batchRunning: false,
+    runningGroup: null,
+    runningCategory: null,
+    activeRuns: 0,
 
     defaultConfig(group) {
       return Object.assign({
@@ -1085,6 +1095,7 @@
       const card = document.createElement('div');
       card.className = `qcard${q.endpoint_type === 'openai_image_edits' ? ' edit-card' : ''}`;
       card.dataset.qid = q.id;
+      card.dataset.category = q.category || '未分类';
       card.innerHTML = `
         <div class="qcard-head">
           <span class="qcard-status"></span>
@@ -1175,7 +1186,7 @@
       figure.appendChild(scroller);
       const foot = document.createElement('div');
       foot.className = 'sci-matrix-footnote';
-      foot.textContent = 'EXP denotes resolutions above 3,686,400 pixels. Arbitrary valid multiples-of-16 are supported beyond these documented presets.';
+      foot.textContent = 'EXP denotes resolutions above 3,686,400 pixels. AUTO accepts the model-selected output dimensions.';
       figure.appendChild(foot);
       return figure;
     },
@@ -1184,6 +1195,7 @@
       const card = document.createElement('div');
       card.className = 'qcard matrix-cell';
       card.dataset.qid = q.id;
+      card.dataset.category = q.category || '未分类';
       card.setAttribute('role', 'gridcell');
       card.setAttribute('aria-label', `${q.image.quality} quality, ${q.image.size} size`);
       card.innerHTML = `
@@ -1249,6 +1261,9 @@
       const probe = result.image_probe || {};
       const formats = Array.isArray(probe.returned_formats) ? probe.returned_formats.join('+') : '';
       const actualSizes = Array.isArray(probe.actual_sizes) ? probe.actual_sizes.filter(Boolean).join('+') : '';
+      const totalBytes = Array.isArray(probe.actual_bytes)
+        ? probe.actual_bytes.reduce((sum, value) => sum + (Number(value) || 0), 0)
+        : 0;
       return [
         Util.badge(result.ok ? 'OK' : 'FAIL', result.ok ? 'ok' : 'fail'),
         result.response_status ? Util.badge(`HTTP ${result.response_status}`) : '',
@@ -1257,6 +1272,7 @@
         probe.returned_n != null ? Util.badge(`${probe.returned_n}/${probe.requested_n} img`, probe.count_ok ? 'ok' : 'fail') : '',
         formats ? Util.badge(formats, probe.format_ok ? 'info' : 'fail') : '',
         actualSizes ? Util.badge(`size=${actualSizes}`, probe.size_ok === false ? 'fail' : 'info') : '',
+        totalBytes ? Util.badge(Util.formatBytes(totalBytes), 'info') : '',
         probe.requested_n > 1 && probe.ms_per_image != null ? Util.badge(`${probe.ms_per_image} ms/img`, 'info') : '',
         result.estimated_cost_usd != null ? Util.badge(`$${Util.formatCost(result.estimated_cost_usd)}`, 'info') : ''
       ].filter(Boolean).join('');
@@ -1294,7 +1310,8 @@
         link.appendChild(img);
         const caption = document.createElement('figcaption');
         const dimensions = image.width && image.height ? ` · ${image.width}×${image.height}` : '';
-        caption.textContent = `#${Number(image.index || 0) + 1} · ${image.response_format || 'image'}${dimensions}`;
+        const fileSize = image.byte_size != null ? ` · ${Util.formatBytes(image.byte_size)}` : '';
+        caption.textContent = `#${Number(image.index || 0) + 1} · ${image.response_format || 'image'}${dimensions}${fileSize}`;
         tile.appendChild(link);
         tile.appendChild(caption);
         gallery.appendChild(tile);
@@ -1383,9 +1400,13 @@
       metrics.className = 'matrix-result-metrics';
       const probe = result.image_probe || {};
       const actualSizes = Array.isArray(probe.actual_sizes) ? probe.actual_sizes.filter(Boolean).join(', ') : '';
+      const totalBytes = Array.isArray(probe.actual_bytes)
+        ? probe.actual_bytes.reduce((sum, value) => sum + (Number(value) || 0), 0)
+        : 0;
       metrics.innerHTML = [
         result.elapsed_ms != null ? `<span>${Util.escapeHtml(result.elapsed_ms)} ms</span>` : '',
         actualSizes ? `<span class="${probe.size_ok === false ? 'metric-fail' : 'metric-ok'}">${Util.escapeHtml(actualSizes)}</span>` : '',
+        totalBytes ? `<span>${Util.escapeHtml(Util.formatBytes(totalBytes))}</span>` : '',
         result.estimated_cost_usd != null ? `<span>$${Util.formatCost(result.estimated_cost_usd)}</span>` : '',
         result.response_status ? `<span>HTTP ${Util.escapeHtml(result.response_status)}</span>` : ''
       ].filter(Boolean).join('');
@@ -1631,14 +1652,18 @@
       if (wrap) wrap.hidden = true;
     },
     refreshControls() {
-      const any = Store.batchRunning || Store.inflight.size > 0;
+      const any = Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0;
       Util.el('run-all').disabled = any;
       Util.el('stop').disabled = !any;
       const reportButton = Util.el('export-image-report');
       if (reportButton && reportButton.dataset.exporting !== 'true') reportButton.disabled = any;
       Cards.all().forEach((card) => {
         const btn = card.querySelector('.qcard-run');
-        if (!card.classList.contains('busy')) btn.disabled = Store.batchRunning;
+        const categoryBlocked = Store.runningCategory && card.dataset.category !== Store.runningCategory;
+        if (!card.classList.contains('busy')) btn.disabled = Store.batchRunning || !!categoryBlocked;
+      });
+      document.querySelectorAll('#group-nav .nav-item').forEach((button) => {
+        button.disabled = !!(Store.runningGroup && button.dataset.group !== Store.runningGroup);
       });
     }
   };
@@ -1648,8 +1673,7 @@
     // Resolve the selected endpoints for the active group into {endpoint, cfg}[].
     // Endpoints missing an API key are dropped (with a warning) so a run never
     // sends an empty key. Returns null (and redirects) if nothing is runnable.
-    selectedTargets() {
-      const group = Store.activeGroup;
+    selectedTargets(group = Store.activeGroup) {
       const ids = Store.selectedIds(group);
       const targets = [];
       for (const id of ids) {
@@ -1671,8 +1695,18 @@
     // Run one question across every selected endpoint and render them side-by-side.
     async runOne(q, card) {
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const targets = Runner.selectedTargets();
+      if (Store.runningGroup && Store.runningGroup !== q.group) {
+        return UI.flash(`正在运行 ${Store.runningGroup}，不能跨任务组并发`, 'error');
+      }
+      const category = q.category || '未分类';
+      if (Store.runningCategory && Store.runningCategory !== category) {
+        return UI.flash(`正在运行 ${Store.runningCategory}，不能跨任务组并发`, 'error');
+      }
+      const targets = Runner.selectedTargets(q.group);
       if (!targets) return;
+      Store.runningGroup = q.group;
+      Store.runningCategory = category;
+      Store.activeRuns++;
       Store.stopFlag = false;
       Cards.setBusy(card, true);
       Cards.renderTargets(card, targets);
@@ -1689,6 +1723,11 @@
         UI.flash(okAll ? `完成 · ${q.name}` : `失败 · ${q.name}`, okAll ? 'done' : 'error');
       } finally {
         Cards.setBusy(card, false);
+        Store.activeRuns = Math.max(0, Store.activeRuns - 1);
+        if (!Store.batchRunning && Store.activeRuns === 0) {
+          Store.runningGroup = null;
+          Store.runningCategory = null;
+        }
         UI.refreshControls();
       }
     },
@@ -1722,15 +1761,20 @@
     },
 
     async runGroup() {
-      if (Store.batchRunning) return;
+      if (Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0) return;
       if (!Store.sessionUser) return UI.flash('需要登录', 'error');
-      const targets = Runner.selectedTargets();
+      const runningGroup = Store.activeGroup;
+      if (Store.runningGroup && Store.runningGroup !== runningGroup) {
+        return UI.flash(`正在运行 ${Store.runningGroup}，不能跨任务组并发`, 'error');
+      }
+      const targets = Runner.selectedTargets(runningGroup);
       if (!targets) return;
       Store.stopFlag = false;
       Store.batchRunning = true;
+      Store.runningGroup = runningGroup;
       UI.refreshControls();
 
-      const qs = Store.questionsForGroup(Store.activeGroup).filter((q) => !Cards.isHiddenByFilter(q));
+      const qs = Store.questionsForGroup(runningGroup).filter((q) => !Cards.isHiddenByFilter(q));
       const total = qs.length * targets.length; // question × (endpoint × model) pairs
       let done = 0;
       const concurrency = Math.max(1, Math.min(20, Number(Util.el('opt-concurrency').value || 1)));
@@ -1765,23 +1809,27 @@
         await Promise.all(Array.from({ length: Math.min(phaseConcurrency, phaseQuestions.length) }, worker));
       };
 
-      // Image probes run category by category. Edit input scaling and n output
-      // scaling are serial so their elapsed times are not contaminated by a
-      // sibling probe. Other categories retain the selected concurrency.
-      const phases = Store.activeGroup === 'Image'
-        ? [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>
-            qs.filter((q) => (q.category || '未分类') === category))
-        : [qs];
-      for (const phase of phases) {
-        if (Store.stopFlag) break;
-        const phaseConcurrency = Store.activeGroup === 'Image' && phase[0] &&
-          ['Edit 多图输入', 'n 多图与耗时'].includes(phase[0].category)
-          ? 1
-          : concurrency;
-        await runPhase(phase, phaseConcurrency);
+      // Never cross category/task-group boundaries: finish one section before
+      // scheduling work from the next. Concurrency only applies within a phase.
+      const phases = [...new Set(qs.map((q) => q.category || '未分类'))].map((category) =>
+        qs.filter((q) => (q.category || '未分类') === category));
+      try {
+        for (const phase of phases) {
+          if (Store.stopFlag) break;
+          Store.runningCategory = (phase[0] && phase[0].category) || '未分类';
+          UI.refreshControls();
+          const phaseConcurrency = runningGroup === 'Image' && phase[0] &&
+            ['Edit 多图输入', 'n 多图与耗时'].includes(phase[0].category)
+            ? 1
+            : concurrency;
+          await runPhase(phase, phaseConcurrency);
+        }
+      } finally {
+        Store.batchRunning = false;
+        Store.runningCategory = null;
+        if (Store.inflight.size === 0) Store.runningGroup = null;
+        UI.refreshControls();
       }
-      Store.batchRunning = false;
-      UI.refreshControls();
       UI.flash(Store.stopFlag ? `已停止 ${done}/${total}` : `完成 ${done}/${total}`, Store.stopFlag ? 'error' : 'done');
       setTimeout(UI.hideProgress, 1200);
       if (Store.activeView === 'history') Admin.refreshLogs();
@@ -1816,7 +1864,7 @@
     URL.revokeObjectURL(url);
   }
 
-  function reportImagePreview(image) {
+  function reportImageSource(image) {
     const source = image && typeof image === 'object' ? image : {};
     const src = String(source.src || '');
     const clean = {
@@ -1825,46 +1873,10 @@
       response_format: source.response_format,
       width: source.width,
       height: source.height,
-      mime_type: source.mime_type
+      mime_type: source.mime_type,
+      byte_size: source.byte_size
     };
-    if (!src.startsWith('data:image/')) return Promise.resolve(clean);
-
-    return new Promise((resolve) => {
-      const img = new Image();
-      let settled = false;
-      const finish = (value) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      const timer = setTimeout(() => finish(null), 15000);
-      img.onload = () => {
-        clearTimeout(timer);
-        try {
-          const maxSide = 500;
-          const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
-          const width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
-          const height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const context = canvas.getContext('2d');
-          context.fillStyle = '#ffffff';
-          context.fillRect(0, 0, width, height);
-          context.drawImage(img, 0, 0, width, height);
-          let preview = canvas.toDataURL('image/jpeg', 0.45);
-          if (preview.length > 450000) preview = canvas.toDataURL('image/jpeg', 0.32);
-          finish(Object.assign({}, clean, { src: preview, mime_type: 'image/jpeg' }));
-        } catch (error) {
-          finish(null);
-        }
-      };
-      img.onerror = () => {
-        clearTimeout(timer);
-        finish(null);
-      };
-      img.src = src;
-    });
+    return clean;
   }
 
   async function collectImageReportRows() {
@@ -1890,8 +1902,8 @@
       const question = found && found.question;
       const images = [];
       for (const image of Array.isArray(result.images) ? result.images : []) {
-        const preview = await reportImagePreview(image);
-        if (preview) images.push(preview);
+        const source = reportImageSource(image);
+        if (source) images.push(source);
       }
       rows.push({
         question_id: qid,
@@ -1971,7 +1983,7 @@
       UI.flash(`报告生成失败 · ${Util.errText(error)}`, 'error');
     } finally {
       delete button.dataset.exporting;
-      button.disabled = Store.batchRunning || Store.inflight.size > 0;
+      button.disabled = Store.batchRunning || Store.activeRuns > 0 || Store.inflight.size > 0;
       button.textContent = originalLabel;
     }
   }
@@ -2030,6 +2042,10 @@
   }
 
   function applyGroup(group, silent) {
+    if (Store.runningGroup && Store.runningGroup !== group) {
+      if (!silent) UI.flash(`正在运行 ${Store.runningGroup}，请先停止后再切换任务组`, 'error');
+      return;
+    }
     Store.activeGroup = group;
     document.body.dataset.group = group;
     const title = Util.el('page-title');

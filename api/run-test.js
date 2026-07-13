@@ -68,7 +68,7 @@ async function executeOne(question, cfg, user, batchId) {
   if (groupName === 'Image') {
     const validateSize = !!(question.validate && question.validate.size);
     let dimensionProbeMs = null;
-    if (response.ok && validateSize && images.length) {
+    if (response.ok && images.length) {
       const startedAt = Date.now();
       await inspectImageDimensions(images);
       dimensionProbeMs = Date.now() - startedAt;

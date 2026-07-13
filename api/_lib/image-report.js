@@ -13,7 +13,7 @@ const EDIT_ASSET_DIR = path.join(ROOT, 'assets', 'image-edit');
 const MAX_RESULTS = 240;
 const MAX_IMAGES_PER_RESULT = 10;
 const MAX_REPORT_IMAGE_FILES = 240;
-const MAX_PDF_BYTES = 3_900_000;
+const MAX_PDF_BYTES = 200 * 1024 * 1024;
 const REPORT_IMAGE_CONCURRENCY = 6;
 
 const CATEGORY_ORDER = ['回图能力', 'Edit 多图输入', 'Quality × Size 矩阵', 'n 多图与耗时'];
@@ -32,17 +32,6 @@ const EDIT_FIXTURES = [
   ['object-compass.png', 'Image 7 · 黄铜罗盘', 'reference object'],
   ['object-mug.png', 'Image 8 · 条纹杯', 'reference object']
 ];
-const PREVIEW_PROFILES = {
-  standard: { width: 600, quality: 58 },
-  medium: { width: 460, quality: 48 },
-  compact: { width: 320, quality: 38 }
-};
-const FALLBACK_PROFILES = [
-  { width: 320, quality: 38 },
-  { width: 240, quality: 32 },
-  { width: 180, quality: 28 }
-];
-
 function clipped(value, max = 240) {
   return String(value == null ? '' : value).slice(0, max);
 }
@@ -63,14 +52,15 @@ function cleanImage(image) {
   const isData = /^data:image\/(?:png|jpe?g|webp);base64,/i.test(src);
   if (!isUrl && !isData) return null;
   if (isUrl && src.length > 8192) return null;
-  if (isData && src.length > 500_000) return null;
+  if (isData && src.length > 4_000_000) return null;
   return {
     src,
     index: numeric(image.index),
     response_format: clipped(image.response_format, 24),
     width: numeric(image.width),
     height: numeric(image.height),
-    mime_type: clipped(image.mime_type, 40)
+    mime_type: clipped(image.mime_type, 40),
+    byte_size: numeric(image.byte_size)
   };
 }
 
@@ -85,6 +75,9 @@ function cleanProbe(probe) {
     size: clipped(source.size, 40),
     requested_size: clipped(source.requested_size, 40),
     actual_sizes: cleanArray(source.actual_sizes, MAX_IMAGES_PER_RESULT),
+    actual_bytes: Array.isArray(source.actual_bytes)
+      ? source.actual_bytes.slice(0, MAX_IMAGES_PER_RESULT).map(numeric)
+      : [],
     elapsed_ms: numeric(source.elapsed_ms),
     ms_per_image: numeric(source.ms_per_image),
     dimension_probe_ms: numeric(source.dimension_probe_ms),
@@ -145,6 +138,14 @@ function formatCost(value) {
   if (n == null) return '--';
   if (n === 0) return 'USD 0';
   return `USD ${n < 0.01 ? n.toFixed(6) : n.toFixed(4)}`;
+}
+
+function formatBytes(value) {
+  const bytes = numeric(value);
+  if (bytes == null || bytes < 0) return '--';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
 function percentile(values, fraction) {
@@ -388,6 +389,7 @@ function recordMetadataTex(row) {
   const requestedSize = probe.requested_size || probe.size || '--';
   const actualSizes = probe.actual_sizes.join(', ') || '--';
   const formats = probe.returned_formats.join(', ') || '--';
+  const totalBytes = probe.actual_bytes.reduce((sum, value) => sum + (Number(value) || 0), 0);
   const requestReturn = `${probe.requested_n == null ? '--' : probe.requested_n} / ${probe.returned_n == null ? '--' : probe.returned_n}`;
   return String.raw`\begin{tabularx}{\textwidth}{>{\bfseries}p{0.17\textwidth}Y>{\bfseries}p{0.17\textwidth}Y}
 Endpoint & ${texEscape(row.endpoint_name || '--')} & Model & \texttt{${texEscape(row.routed_model_id || row.model_id || '--')}} \\
@@ -395,7 +397,8 @@ Category & ${texEscape(row.category || '--')} & Endpoint type & \texttt{${texEsc
 Auto / Manual & ${statusTex(row.ok)}\ /\ ${manualTex(row.manual_verdict)} & HTTP / Latency & ${row.response_status == null ? '--' : row.response_status}\ /\ ${texEscape(formatMs(row.elapsed_ms))} \\
 Requested / Returned & ${requestReturn} & Format & ${texEscape(probe.requested_format || '--')} / ${texEscape(formats)} \\
 Quality / Size & ${texEscape(probe.quality || '--')} / ${texEscape(requestedSize)} & Actual size & ${texEscape(actualSizes)} \\
-Count / Format / Size & ${checkTex(probe.count_ok)} / ${checkTex(probe.format_ok)} / ${checkTex(probe.size_ok)} & Cost & ${formatCost(row.estimated_cost_usd)} \\
+Output bytes & ${texEscape(totalBytes ? formatBytes(totalBytes) : '--')} & Cost & ${formatCost(row.estimated_cost_usd)} \\
+Count / Format / Size & ${checkTex(probe.count_ok)} / ${checkTex(probe.format_ok)} / ${checkTex(probe.size_ok)} & & \\
 \end{tabularx}`;
 }
 
@@ -440,13 +443,12 @@ function imageAvailabilityTex(figures, rows) {
   const readableInputs = inputItems.filter((item) => item.file).length;
   const readableOutputs = outputItems.filter((item) => item.file).length;
   const unavailableOutputs = outputItems.length - readableOutputs;
-  const profile = figures.previewProfile || {};
   return String.raw`本报告为 ${rows.length} 次已执行运行建立逐测试点记录。Edit 输入位置共 ${inputItems.length} 个，其中 ${readableInputs} 个在排版时可读取；输出位置共 ${outputItems.length} 个，其中 ${readableOutputs} 个在排版时可读取，${unavailableOutputs} 个显示事实占位。
 
-URL 图片会在报告生成阶段重新下载；生成阶段未返回图片字节的位置显示“无可用输出图”。PDF 中嵌入的是宽度不超过 ${profile.width || '--'} px、JPEG quality=${profile.quality || '--'} 的排版预览。运行表中的数量、格式、耗时和实际像素字段保留为测试记录。`;
+URL 图片会在报告生成阶段重新下载；生成阶段未返回图片字节的位置显示“无可用输出图”。PDF 中 PNG/JPEG 使用原始返回字节，不缩放、不降低质量；WebP 仅为 TeX 兼容性无损转换为 PNG。运行表保留数量、格式、耗时、实际像素和文件大小。`;
 }
 
-function buildImageReportTex(report, figures = { records: [], errors: [], previewProfile: {} }) {
+function buildImageReportTex(report, figures = { records: [], errors: [] }) {
   const rows = report.results;
   const s = stats(rows);
   const uniqueQuestions = new Set(rows.map((row) => row.question_id)).size;
@@ -573,33 +575,26 @@ ${appendixTex(rows)}
 async function sourceBytes(src) {
   const data = String(src || '').match(/^data:image\/(?:png|jpe?g|webp);base64,([\s\S]+)$/i);
   if (data) return Buffer.from(data[1], 'base64');
-  return fetchImageBytes(src, 6000);
+  return fetchImageBytes(src, 30000);
 }
 
-function profileForCount(imageCount) {
-  if (imageCount <= 50) return Object.assign({}, PREVIEW_PROFILES.standard);
-  if (imageCount <= 100) return Object.assign({}, PREVIEW_PROFILES.medium);
-  return Object.assign({}, PREVIEW_PROFILES.compact);
-}
-
-async function writePreview(buffer, outputPath, profile) {
-  await sharp(buffer, { failOn: 'none', limitInputPixels: 80_000_000, sequentialRead: true })
-    .rotate()
-    .resize({
-      width: profile.width,
-      height: profile.width,
-      fit: 'inside',
-      withoutEnlargement: true
-    })
-    .flatten({ background: '#ffffff' })
-    .jpeg({
-      quality: profile.quality,
-      chromaSubsampling: '4:2:0',
-      progressive: true,
-      mozjpeg: true
-    })
-    .toFile(outputPath);
-  return fs.statSync(outputPath).size;
+async function writeOriginalImage(buffer, outputBase, declaredMime) {
+  const metadata = await sharp(buffer, { failOn: 'none', limitInputPixels: 80_000_000 }).metadata();
+  const format = String(metadata.format || '').toLowerCase();
+  if (format === 'png' || format === 'jpeg' || format === 'jpg') {
+    const ext = format === 'png' ? '.png' : '.jpg';
+    const file = `${outputBase}${ext}`;
+    fs.writeFileSync(file, buffer);
+    return { file: path.basename(file), sourceBytes: buffer.length, converted: false };
+  }
+  if (format === 'webp' || declaredMime === 'image/webp') {
+    const file = `${outputBase}.png`;
+    await sharp(buffer, { failOn: 'none', limitInputPixels: 80_000_000 })
+      .png({ compressionLevel: 6, adaptiveFiltering: true })
+      .toFile(file);
+    return { file: path.basename(file), sourceBytes: buffer.length, converted: true };
+  }
+  throw new Error(`unsupported report image format: ${format || declaredMime || 'unknown'}`);
 }
 
 function actualSizeFor(row, image, index) {
@@ -620,24 +615,17 @@ function unavailableOutput(row, index, note) {
 
 async function prepareFigures(report, tempDir) {
   const maxInputs = report.results.reduce((max, row) => Math.max(max, editInputCount(row)), 0);
-  const submittedOutputs = report.results.reduce((sum, row) => sum + row.images.length, 0);
-  const previewProfile = profileForCount(maxInputs + submittedOutputs);
   const fixtures = [];
   const records = [];
   const errors = [];
-  const previewFiles = [];
 
   for (let index = 0; index < maxInputs; index++) {
     const [file, label, role] = EDIT_FIXTURES[index];
-    const output = `fixture-${String(index + 1).padStart(2, '0')}.jpg`;
+    const outputBase = path.join(tempDir, `fixture-${String(index + 1).padStart(2, '0')}`);
     try {
-      await writePreview(
-        fs.readFileSync(path.join(EDIT_ASSET_DIR, file)),
-        path.join(tempDir, output),
-        previewProfile
-      );
-      fixtures.push({ file: output, title: label, caption: role, note: '' });
-      previewFiles.push(output);
+      const source = fs.readFileSync(path.join(EDIT_ASSET_DIR, file));
+      const written = await writeOriginalImage(source, outputBase, 'image/png');
+      fixtures.push({ file: written.file, title: label, caption: `${role} · ${formatBytes(source.length)}`, note: '' });
     } catch (error) {
       const note = `报告生成时未能读取输入文件 ${file}：${clipped(error.message, 180)}`;
       fixtures.push({ file: null, title: label, caption: '无可用输入图', note });
@@ -670,8 +658,8 @@ async function prepareFigures(report, tempDir) {
         continue;
       }
       processedImageFiles++;
-      const output = `output-${String(rowIndex + 1).padStart(3, '0')}-${String(imageIndex + 1).padStart(2, '0')}.jpg`;
-      imageJobs.push({ image, imageIndex, output, record, row });
+      const outputBase = path.join(tempDir, `output-${String(rowIndex + 1).padStart(3, '0')}-${String(imageIndex + 1).padStart(2, '0')}`);
+      imageJobs.push({ image, imageIndex, outputBase, record, row });
     }
   }
 
@@ -680,19 +668,15 @@ async function prepareFigures(report, tempDir) {
     while (nextJob < imageJobs.length) {
       const job = imageJobs[nextJob++];
       try {
-        await writePreview(
-          await sourceBytes(job.image.src),
-          path.join(tempDir, job.output),
-          previewProfile
-        );
+        const bytes = await sourceBytes(job.image.src);
+        const written = await writeOriginalImage(bytes, job.outputBase, job.image.mime_type);
         const actual = actualSizeFor(job.row, job.image, job.imageIndex);
         job.record.outputs[job.imageIndex] = {
-          file: job.output,
+          file: written.file,
           title: `Output ${job.imageIndex + 1}`,
-          caption: `${job.image.response_format || job.row.probe.returned_formats[job.imageIndex] || 'image'} · ${actual}`,
+          caption: `${job.image.response_format || job.row.probe.returned_formats[job.imageIndex] || 'image'} · ${actual} · ${formatBytes(job.image.byte_size || written.sourceBytes)}${written.converted ? ' · WebP→PNG lossless' : ''}`,
           note: ''
         };
-        previewFiles.push(job.output);
       } catch (error) {
         const note = `报告生成时未能读取 Output ${job.imageIndex + 1}：${clipped(error.message, 180)}`;
         job.record.outputs[job.imageIndex] = unavailableOutput(job.row, job.imageIndex, note);
@@ -705,17 +689,7 @@ async function prepareFigures(report, tempDir) {
     imageWorker
   ));
 
-  return { fixtures, records, errors, previewFiles, previewProfile };
-}
-
-async function recompressPreviews(figures, tempDir, profile) {
-  for (const file of figures.previewFiles) {
-    const source = path.join(tempDir, file);
-    const temp = `${source}.recompress-${process.pid}`;
-    await writePreview(fs.readFileSync(source), temp, profile);
-    fs.renameSync(temp, source);
-  }
-  figures.previewProfile = Object.assign({}, profile);
+  return { fixtures, records, errors, originalQuality: true };
 }
 
 function ensureRuntimeBinary() {
@@ -785,14 +759,7 @@ async function compileImageReport(input) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mqt-image-report-'));
   try {
     const figures = await prepareFigures(report, tempDir);
-    let compiled = await compileTex(report, figures, tempDir);
-    for (const profile of FALLBACK_PROFILES) {
-      if (compiled.pdf.length <= MAX_PDF_BYTES) break;
-      if (profile.width === figures.previewProfile.width &&
-          profile.quality === figures.previewProfile.quality) continue;
-      await recompressPreviews(figures, tempDir, profile);
-      compiled = await compileTex(report, figures, tempDir);
-    }
+    const compiled = await compileTex(report, figures, tempDir);
     if (compiled.pdf.length > MAX_PDF_BYTES) {
       throw new Error(`Generated PDF is too large (${compiled.pdf.length} bytes)`);
     }

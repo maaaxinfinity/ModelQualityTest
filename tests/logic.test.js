@@ -167,7 +167,7 @@ assert(matrixQuestions.every((q) => q.image.n === 1 && q.image.response_format =
 assert(matrixQuestions.every((q) => q.validate && q.validate.size === true));
 assert.equal(new Set(matrixQuestions.map((q) => q.matrix.color)).size, 24);
 assert.equal(new Set(matrixQuestions.map((q) => q.prompt)).size, 24);
-assert(matrixQuestions.every((q) => q.prompt.includes(`translucent ${q.matrix.color} glass cube`)));
+assert(matrixQuestions.every((q) => q.prompt.includes(`must be distinctly ${q.matrix.color}`)));
 
 const nQuestions = QUESTIONS.filter((q) => q.category === 'n 多图与耗时');
 assert.deepEqual(nQuestions.map((q) => q.image.n), [2, 4, 8]);
@@ -204,6 +204,7 @@ const sanitizedReport = sanitizeImageReport({
       quality: 'low',
       requested_size: '1024x1024',
       actual_sizes: Array(8).fill('1024x1024'),
+      actual_bytes: Array(8).fill(1024),
       count_ok: true,
       format_ok: true,
       size_ok: true
@@ -254,6 +255,7 @@ assert.equal(extractedB64.length, 1);
 assert.equal(extractedB64[0].response_format, 'b64_json');
 assert(extractedB64[0].src.startsWith('data:image/png;base64,'));
 assert.equal(extractedB64[0].base64_chars, 200);
+assert.equal(extractedB64[0].byte_size, Buffer.from(b64, 'base64').length);
 const extractedUrl = extractImageArtifacts({ data: [{ url: 'https://images.example.test/1.png' }] }, {});
 assert.deepEqual(extractedUrl.map((item) => item.response_format), ['url']);
 assert.equal(extractedUrl[0].src, 'https://images.example.test/1.png');
@@ -283,7 +285,7 @@ webpHeader.writeUInt32LE(10, 16);
 webpHeader.writeUIntLE(639, 24, 3);
 webpHeader.writeUIntLE(479, 27, 3);
 assert.deepEqual(parseImageDimensions(webpHeader), { width: 640, height: 480, mime_type: 'image/webp' });
-const sizedImage = [{ response_format: 'url', src: 'https://images.example.test/1.png', width: 1536, height: 1024 }];
+const sizedImage = [{ response_format: 'url', src: 'https://images.example.test/1.png', width: 1536, height: 1024, byte_size: 123456 }];
 const exactSizeProbe = summarizeImageProbe(sizedImage, {
   n: 1,
   size: '1536x1024',
@@ -292,6 +294,7 @@ const exactSizeProbe = summarizeImageProbe(sizedImage, {
 assert.equal(exactSizeProbe.error, null);
 assert.equal(exactSizeProbe.probe.size_ok, true);
 assert.deepEqual(exactSizeProbe.probe.actual_sizes, ['1536x1024']);
+assert.deepEqual(exactSizeProbe.probe.actual_bytes, [123456]);
 assert.equal(exactSizeProbe.probe.dimension_probe_ms, 80);
 const wrongSizeProbe = summarizeImageProbe(sizedImage, {
   n: 1,

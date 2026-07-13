@@ -633,12 +633,12 @@ const IMAGE_EDIT_QUESTIONS = [
 
 const IMAGE_MATRIX_QUALITIES = ['low', 'medium', 'high'];
 const IMAGE_MATRIX_COLORS = [
-  'ruby-red', 'tangerine-orange', 'golden-amber', 'lemon-yellow',
-  'chartreuse-green', 'emerald-green', 'turquoise', 'cyan',
-  'sky-blue', 'cobalt-blue', 'sapphire-blue', 'indigo',
-  'violet', 'amethyst-purple', 'magenta', 'fuchsia-pink',
-  'rose-pink', 'coral', 'burgundy-red', 'copper-brown',
-  'mint-green', 'seafoam-green', 'lavender', 'smoky-gray'
+  'ruby red', 'tangerine orange', 'golden amber', 'lemon yellow',
+  'chartreuse green', 'emerald green', 'turquoise', 'cyan',
+  'sky blue', 'cobalt blue', 'sapphire blue', 'indigo',
+  'violet', 'amethyst purple', 'magenta', 'fuchsia pink',
+  'rose pink', 'coral', 'burgundy red', 'copper brown',
+  'mint green', 'seafoam green', 'lavender', 'smoky gray'
 ];
 const IMAGE_MATRIX_SIZES = [
   { id: 'square-1k', value: '1024x1024', label: '1K square', aspect: '1:1', pixels: '1.05 MP', tier: '1K' },
@@ -662,7 +662,7 @@ const IMAGE_MATRIX_QUESTIONS = IMAGE_MATRIX_QUALITIES.flatMap((quality, qualityI
       category: 'Quality × Size 矩阵',
       name: `${quality} · ${size.value}`,
       description: `${size.label}，quality=${quality}，cube=${color}`,
-      prompt: `A studio product photograph of a translucent ${color} glass cube on a pale stone pedestal, soft directional light, clean neutral background, no text.`,
+      prompt: `A studio product photograph of a translucent glass cube on a pale stone pedestal. The cube must be distinctly ${color}; preserve that exact cube color and do not substitute another color. Soft directional light, clean neutral background, no text.`,
       image: { n: 1, quality, size: size.value, response_format: 'url' },
       matrix: { quality, size: size.value, color, ...size },
       layout: 'image-matrix',

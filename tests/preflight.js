@@ -52,11 +52,22 @@ assert(
   'run-test edit fixtures and Tectonic bundle must be included'
 );
 assert(vercel.crons && vercel.crons.some((cron) => cron.path === '/api/cron/sync'), 'combined sync cron missing');
+assert(vercel.headers.some((entry) => entry.source === '/questions.js'), 'questions.js cache-control header missing');
 // Hobby plan caps a deployment at 12 serverless functions.
 const fnCount = fs.readdirSync(path.join(process.cwd(), 'api'), { recursive: true })
   .filter((f) => String(f).endsWith('.js') && !String(f).replace(/\\/g, '/').includes('_lib/')).length;
 assert(fnCount <= 12, `too many serverless functions: ${fnCount} > 12 (Hobby plan cap)`);
 ok('vercel config', `${fnCount} functions`);
+
+const appSource = fs.readFileSync(path.join(process.cwd(), 'app.js'), 'utf8');
+const reportSource = fs.readFileSync(path.join(process.cwd(), 'api', '_lib', 'image-report.js'), 'utf8');
+assert(appSource.includes('Store.runningGroup'), 'cross-group run lock missing');
+assert(appSource.includes('Store.runningCategory'), 'cross-category run lock missing');
+assert(appSource.includes('Store.activeRuns'), 'active run counter missing');
+assert(appSource.includes('Never cross category/task-group boundaries'), 'category phase scheduler missing');
+assert(!reportSource.includes('.resize({'), 'PDF report must not resize source images');
+assert(!reportSource.includes('.jpeg({'), 'PDF report must not JPEG-recompress source images');
+ok('image report originals and group scheduling');
 
 if (process.platform === 'linux' && process.arch === 'x64') {
   checkFile('vendor/tectonic/tectonic');

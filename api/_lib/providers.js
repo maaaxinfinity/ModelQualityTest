@@ -408,7 +408,7 @@ function extractImageArtifacts(body, requestBody) {
         src: `data:${mimeType};base64,${clean}`,
         mime_type: mimeType,
         base64_chars: clean.length,
-        byte_estimate: Math.floor(clean.length * 3 / 4),
+        byte_size: Buffer.from(clean, 'base64').length,
         revised_prompt: revisedPrompt
       });
     }
@@ -556,6 +556,7 @@ async function inspectImageDimensions(images) {
       } else {
         bytes = await fetchImageBytes(image.src);
       }
+      image.byte_size = bytes.length;
       const dimensions = parseImageDimensions(bytes);
       if (!dimensions || !dimensions.width || !dimensions.height) throw new Error('unsupported or malformed image bytes');
       image.width = dimensions.width;
@@ -575,6 +576,7 @@ function summarizeImageProbe(images, requestBody, elapsedMs, options = {}) {
   const requestedSize = (requestBody && requestBody.size) || null;
   const returnedFormats = [...new Set(artifacts.map((image) => image.response_format).filter(Boolean))];
   const actualSizes = artifacts.map((image) => image.width && image.height ? `${image.width}x${image.height}` : null);
+  const actualBytes = artifacts.map((image) => Number.isFinite(Number(image.byte_size)) ? Number(image.byte_size) : null);
   const dimensionErrors = artifacts.map((image) => image.dimension_error || null);
   const countOk = artifacts.length === requestedN;
   const formatOk = !requestedFormat ||
@@ -593,6 +595,7 @@ function summarizeImageProbe(images, requestBody, elapsedMs, options = {}) {
     size: (requestBody && requestBody.size) || null,
     requested_size: requestedSize,
     actual_sizes: actualSizes,
+    actual_bytes: actualBytes,
     dimension_errors: dimensionErrors,
     elapsed_ms: elapsedMs,
     dimension_probe_ms: options.dimensionProbeMs == null ? null : options.dimensionProbeMs,
